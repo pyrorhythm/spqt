@@ -36,7 +36,7 @@ func Logger() *zerolog.Logger {
 			zerolog.ConsoleWriter{Out: os.Stdout},
 			// os.Stderr,
 		)).
-			Level(zerolog.DebugLevel).
+			Level(zerolog.TraceLevel).
 			With().
 			Timestamp().
 			Caller().

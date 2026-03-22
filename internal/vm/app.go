@@ -26,5 +26,9 @@ func (App) Create(ctx context.Context) *App {
 	app.Auth = Auth{}.Create(ctx)
 	app.Player = Player{}.Create(ctx)
 
+	app.Auth.State.OnExact(ASReady, func() {
+		// switch to player window...
+	})
+
 	return app
 }

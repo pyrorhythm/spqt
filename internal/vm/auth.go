@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sync/atomic"
 
+	"github.com/pyrorhythm/spqt/pkg/log"
 	"github.com/pyrorhythm/spqt/pkg/reactive"
 	"github.com/pyrorhythm/spqt/pkg/rs-wrap"
 )
@@ -50,6 +51,7 @@ func openWithBrowser(url string) error {
 func (v Auth) spawnEventReader(ech <-chan rs.Event) {
 	go func() {
 		for e := range ech {
+			log.Logger().Trace().Any("e", e).Msg("got event")
 			switch typedE := e.(type) {
 			case rs.SessionAuthorizedEvent:
 				v.Session = typedE.Session

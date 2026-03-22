@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 
 	librespot "github.com/devgianlu/go-librespot"
 	"github.com/devgianlu/go-librespot/ap"
@@ -105,8 +106,9 @@ func (f FailedEvent) iAmAnEvent()            {}
 func (l CodeReceivedEvent) iAmAnEvent()      {}
 
 const (
-	deviceIDFile    = "./cache/deviceID"
-	credentialsFile = "./cache/spotifyCredentials"
+	cacheDir        = "./cache"
+	deviceIDFile    = "deviceID"
+	credentialsFile = "spotifyCredentials"
 )
 
 var oa2Conf = &oauth2.Config{
@@ -157,9 +159,18 @@ func getDeviceID() (id string, new bool) {
 	return hex.EncodeToString(bytes), true
 }
 
+func dirNe(dir string) {
+	fi, err := os.Stat(dir)
+	if fi == nil || err != nil {
+		os.MkdirAll(dir, 0755)
+	}
+
+}
+
 func read(file string) ([]byte, error) {
+	dirNe(cacheDir)
 	f, err := os.OpenFile(
-		file,
+		path.Join(cacheDir, file),
 		os.O_RDONLY,
 		0o700)
 	if err != nil {
@@ -188,7 +199,7 @@ func readJSON[T any](file string) (*T, error) {
 
 func write(file string, pl []byte) error {
 	f, err := os.OpenFile(
-		file,
+		path.Join(cacheDir, file),
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
 		0o700)
 	if err != nil {

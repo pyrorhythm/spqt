@@ -6,6 +6,7 @@ import (
 	qt "github.com/mappu/miqt/qt6"
 
 	"github.com/pyrorhythm/spqt/internal/vm"
+	"github.com/pyrorhythm/spqt/pkg/log"
 )
 
 func buildAuthPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
@@ -14,12 +15,15 @@ func buildAuthPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
 	page.SetLayout(layout.QLayout)
 
 	status := qt.NewQLabel(page)
+	status.SetAlignment(qt.AlignCenter)
+	status.SetFont(font)
 	retryBtn := qt.NewQPushButton5("Retry", page)
 
 	layout.AddWidget(status.QWidget)
 	layout.AddWidget(retryBtn.QWidget)
 
 	avm.State.OnChange(func(s vm.AuthState) {
+		log.Logger().Trace().Any("s", s).Msg("got state change")
 		switch s {
 		case vm.ASChecking:
 			status.SetText("Connecting...")

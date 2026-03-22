@@ -20,11 +20,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
-	qt.NewQApplication(os.Args)
-
-	aw := qtui.AppWindow{}.Create(ctx)
+	aw := qtui.AppWindow{}.Create(ctx, qt.NewQApplication(os.Args))
 	aw.MainW.Show()
 	aw.AppV.Auth.LoginCmd.Execute(ctx)
+	aw.SetTheme(qtui.AquaDark)
 
 	qt.QApplication_Exec()
 }

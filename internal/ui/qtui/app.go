@@ -12,10 +12,24 @@ type AppWindow struct {
 	MainW *qt.QMainWindow
 
 	AppV *vm.App
+
+	qtapp *qt.QApplication
 }
 
-func (AppWindow) Create(ctx context.Context) *AppWindow {
-	aw := &AppWindow{qt.NewQMainWindow2(), vm.App{}.Create(ctx)}
+type Themable interface {
+	QSS() string
+}
+
+func (w AppWindow) SetTheme(t Themable) {
+	w.qtapp.SetStyleSheet(t.QSS())
+}
+
+func (AppWindow) Create(ctx context.Context, qa *qt.QApplication) *AppWindow {
+	aw := &AppWindow{
+		MainW: qt.NewQMainWindow2(),
+		AppV:  vm.App{}.Create(ctx),
+		qtapp: qa,
+	}
 
 	pages := qt.NewQStackedWidget2()
 	pages.AddWidget(buildAuthPage(ctx, aw.AppV.Auth))
