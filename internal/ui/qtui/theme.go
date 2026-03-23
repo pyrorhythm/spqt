@@ -119,6 +119,3 @@ func (t Theme) QSS() string {
 	return r.Replace(styleTemplate)
 }
 
-func ApplyTheme(t Theme) {
-
-}

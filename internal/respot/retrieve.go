@@ -1,4 +1,4 @@
-package rs
+package respot
 
 import (
 	"bytes"
@@ -64,7 +64,7 @@ func retrieveClientToken(c *http.Client, deviceId string) (string, error) {
 
 	var protoResp pbhttp.ClientTokenResponse
 	if err := proto.Unmarshal(respBody, &protoResp); err != nil {
-		return "", fmt.Errorf("faield unmarshalling clienttoken response: %w", err)
+		return "", fmt.Errorf("failed unmarshalling clienttoken response: %w", err)
 	}
 
 	switch protoResp.ResponseType {

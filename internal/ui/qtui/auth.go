@@ -18,6 +18,7 @@ func buildAuthPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
 	status.SetAlignment(qt.AlignCenter)
 	status.SetFont(font)
 	retryBtn := qt.NewQPushButton5("Retry", page)
+	retryBtn.SetVisible(false)
 
 	layout.AddWidget(status.QWidget)
 	layout.AddWidget(retryBtn.QWidget)
@@ -29,7 +30,7 @@ func buildAuthPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
 			status.SetText("Connecting...")
 			retryBtn.QWidget.SetVisible(false)
 		case vm.ASNeedsLogin:
-			status.SetText("Please, authenticate in opened window")
+			status.SetText("Please, auth in opened window")
 			retryBtn.QWidget.SetVisible(false)
 		case vm.ASAuthorizing:
 			status.SetText("Authorizing...")

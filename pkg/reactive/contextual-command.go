@@ -6,7 +6,7 @@ import (
 
 type SentinelBool uint
 
-func (s SentinelBool) IsUnset() bool {
+func (s SentinelBool) Unset() bool {
 	return s == Unset
 }
 
@@ -18,12 +18,12 @@ func (s SentinelBool) Value() bool {
 	return false
 }
 
-func SBoolFrom(b bool) SentinelBool {
+func (s *SentinelBool) Set(b bool) {
 	if b {
-		return True
+		*s = True
 	}
 
-	return False
+	*s = False
 }
 
 const (
@@ -67,10 +67,10 @@ func (c *CtxCommand) CanExecute(ctx context.Context) bool {
 // Call this after mutating state that affects the condition.
 func (c *CtxCommand) Refresh(ctx context.Context) {
 	cur := c.CanExecute(ctx)
-	if !c.lastCanExec.IsUnset() && c.lastCanExec.Value() == cur {
+	if !c.lastCanExec.Unset() && c.lastCanExec.Value() == cur {
 		return
 	}
-	c.lastCanExec = SBoolFrom(cur)
+	c.lastCanExec.Set(cur)
 	for _, fn := range c.listeners {
 		fn(cur)
 	}

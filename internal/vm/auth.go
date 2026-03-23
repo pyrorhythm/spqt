@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"sync/atomic"
 
+	"github.com/pyrorhythm/spqt/internal/types"
 	"github.com/pyrorhythm/spqt/pkg/log"
 	"github.com/pyrorhythm/spqt/pkg/reactive"
-	"github.com/pyrorhythm/spqt/pkg/rs-wrap"
 )
 
 type AuthState string
@@ -23,15 +23,12 @@ const (
 )
 
 type Auth struct {
-	State *reactive.Prop[AuthState]
-	Error *reactive.Prop[error]
-	//
+	State    *reactive.Prop[AuthState]
+	Error    *reactive.Prop[error]
 	LoginCmd *reactive.CtxCommand
-	//
-	Session *rs.Session
+	Session  types.Session
 
-	//
-
+	auth               types.Authenticator
 	eventReaderRunning atomic.Bool
 }
 
@@ -48,41 +45,38 @@ func openWithBrowser(url string) error {
 	}
 }
 
-func (v Auth) spawnEventReader(ech <-chan rs.Event) {
+func (v *Auth) spawnEventReader(ech <-chan types.Event) {
 	go func() {
 		for e := range ech {
 			log.Logger().Trace().Any("e", e).Msg("got event")
 			switch typedE := e.(type) {
-			case rs.SessionAuthorizedEvent:
+			case types.SessionAuthorizedEvent:
 				v.Session = typedE.Session
 				v.State.Set(ASReady)
-				break
-			case rs.LinkEvent:
+			case types.LinkEvent:
 				v.State.Set(ASNeedsLogin)
 				openWithBrowser(typedE.Link)
-			case rs.CodeReceivedEvent:
+			case types.CodeReceivedEvent:
 				v.State.Set(ASAuthorizing)
-			case rs.FailedEvent:
+			case types.FailedEvent:
 				v.Error.Set(typedE.Error)
 				v.State.Set(ASAuthError)
-				break
 			}
 		}
 	}()
 }
 
-func (Auth) Create(context.Context) *Auth {
+func newAuthVM(auth types.Authenticator) *Auth {
 	v := &Auth{
-		State:   reactive.NewProp[AuthState](ASChecking),
-		Error:   reactive.NewProp[error](nil),
-		Session: nil,
+		State: reactive.NewProp[AuthState](ASChecking),
+		Error: reactive.NewProp[error](nil),
+		auth:  auth,
 	}
 
 	v.LoginCmd = reactive.NewCtxCommand(
-		func(ctx context.Context) { v.spawnEventReader(rs.Authorize(ctx)) },
+		func(ctx context.Context) { v.spawnEventReader(v.auth.Authorize(ctx)) },
 		func(context.Context) bool { return !v.eventReaderRunning.Load() },
 	)
 
 	return v
-
 }

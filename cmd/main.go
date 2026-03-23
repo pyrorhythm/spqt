@@ -9,6 +9,7 @@ import (
 
 	qt "github.com/mappu/miqt/qt6"
 
+	"github.com/pyrorhythm/spqt/internal/respot"
 	"github.com/pyrorhythm/spqt/internal/ui/qtui"
 )
 
@@ -20,9 +21,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
-	aw := qtui.AppWindow{}.Create(ctx, qt.NewQApplication(os.Args))
-	aw.MainW.Show()
-	aw.AppV.Auth.LoginCmd.Execute(ctx)
+	aw := qtui.AppWindow{}.Create(ctx, qt.NewQApplication(os.Args), respot.NewAuth())
+	aw.MW.Show()
+	aw.VM.Auth.LoginCmd.Execute(ctx)
 	aw.SetTheme(qtui.AquaDark)
 
 	qt.QApplication_Exec()
