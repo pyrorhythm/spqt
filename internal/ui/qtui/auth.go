@@ -7,21 +7,18 @@ import (
 
 	"github.com/pyrorhythm/spqt/internal/vm"
 	"github.com/pyrorhythm/spqt/pkg/log"
+	"github.com/pyrorhythm/spqt/pkg/qtw"
 )
 
 func buildAuthPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
-	page := qt.NewQWidget2()
-	layout := qt.NewQVBoxLayout2()
-	page.SetLayout(layout.QLayout)
+	page := qtw.Widget()
 
-	status := qt.NewQLabel(page)
-	status.SetAlignment(qt.AlignCenter)
-	status.SetFont(font)
-	retryBtn := qt.NewQPushButton5("Retry", page)
-	retryBtn.SetVisible(false)
+	status := qtw.EmptyLabel().Align(qt.AlignCenter).Font(font).Build()
+	retryBtn := qtw.Button("Retry").Visible(false).
+		OnClick(func() { avm.LoginCmd.Execute(ctx) }).
+		Build()
 
-	layout.AddWidget(status.QWidget)
-	layout.AddWidget(retryBtn.QWidget)
+	page.SetLayout(qtw.VBox().Items(status, retryBtn))
 
 	avm.State.OnChange(func(s vm.AuthState) {
 		log.Logger().Trace().Any("s", s).Msg("got state change")
@@ -42,10 +39,6 @@ func buildAuthPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
 			status.SetText("Good to go!")
 			retryBtn.QWidget.SetVisible(false)
 		}
-	})
-
-	retryBtn.OnClicked(func() {
-		avm.LoginCmd.Execute(ctx)
 	})
 
 	return page

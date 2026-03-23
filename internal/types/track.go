@@ -132,9 +132,7 @@ func (a *Album) FromProto(pb *metadatapb.Album) {
 	}
 
 	if len(pb.Gid) > 0 {
-		a.URI = librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, pb.Gid).Uri()
-		// NOTE: SpotifyIdType for albums doesn't exist in go-librespot,
-		// construct URI manually if needed: "spotify:album:" + librespot.GidToBase62(pb.Gid)
+		a.URI = "spotify:album:" + librespot.GidToBase62(pb.Gid)
 	}
 
 	if pb.Date != nil {
@@ -150,6 +148,9 @@ func (a *Album) FromProto(pb *metadatapb.Album) {
 	}
 
 	a.Covers = imagesFromProto(pb.Cover)
+	if len(a.Covers) == 0 && pb.CoverGroup != nil {
+		a.Covers = imagesFromProto(pb.CoverGroup.GetImage())
+	}
 }
 
 func (a *Artist) FromProto(pb *metadatapb.Artist) {
@@ -163,6 +164,9 @@ func (a *Artist) FromProto(pb *metadatapb.Artist) {
 	}
 
 	a.Portraits = imagesFromProto(pb.Portrait)
+	if len(a.Portraits) == 0 && pb.PortraitGroup != nil {
+		a.Portraits = imagesFromProto(pb.PortraitGroup.GetImage())
+	}
 }
 
 func (p *Playlist) FromProto(pb *playlist4pb.SelectedListContent) {

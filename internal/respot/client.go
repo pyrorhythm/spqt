@@ -38,22 +38,6 @@ func (c *clientImpl) resolve(ctx context.Context, sc *connectpb.Context) (*spcli
 //   - all: `spotify:user:<user_id>:collection`
 //   - of artist: `spotify:user:<user_id>:collection:artist:<artist_id>`
 // - search: `spotify:search:<search+query>` (whitespaces are replaced with `+`)
-//
-// ## Query params found in the wild:
-// - include_video=true
-//
-// ## Known results of uri types:
-// - uris of type `track`
-//   - returns a single page with a single track
-//   - when requesting a single track with a query in the request, the returned track uri
-//     **will** contain the query
-// - uris of type `artist`
-//   - returns 2 pages with tracks: 10 most popular tracks and latest/popular album
-//   - remaining pages are artist albums sorted by popularity (only provided as page_url)
-// - uris of type `search`
-//   - is massively influenced by the provided query
-//   - the query result shown by the search expects no query at all
-//   - uri looks like `spotify:search:never+gonna`
 
 func (c *clientImpl) Search(ctx context.Context, query string) (*spclient.ContextResolver, error) {
 	encq := strings.Join(strings.Fields(query), "+")
@@ -154,9 +138,10 @@ func (c *clientImpl) FetchArtistMetadata(ctx context.Context, uri string) (*type
 	return &a, nil
 }
 
-// EnrichPage fetches a page from the resolver, then issues a single batched
-// ExtendedMetadata request for all tracks, albums, and artists on that page.
-// Returns enriched tracks with full metadata attached.
+// EnrichPage fetches a page from the resolver, then issues batched metadata
+// requests. Phase 1: fetch all track metadata. Phase 2: extract album/artist
+// URIs from the track protos and batch-fetch those (ProvidedTrack metadata
+// from context-resolve often lacks album_uri/artist_uri).
 func (c *clientImpl) EnrichPage(
 	ctx context.Context,
 	cr *spclient.ContextResolver,
@@ -170,105 +155,113 @@ func (c *clientImpl) EnrichPage(
 		return nil, nil
 	}
 
-	// Convert to ProvidedTracks and collect all URIs we need metadata for.
+	lg := log.Ctx(ctx)
+
+	// Convert to ProvidedTracks, collect track URIs.
 	pts := make([]*connectpb.ProvidedTrack, 0, len(ctxTracks))
-	trackURIs := make([]string, 0, len(ctxTracks))
-	albumURISet := make(map[string]struct{})
-	artistURISet := make(map[string]struct{})
-
 	for _, ct := range ctxTracks {
-		pt := librespot.ContextTrackToProvidedTrack(cr.Type(), ct)
-		pts = append(pts, pt)
-		trackURIs = append(trackURIs, pt.Uri)
-
-		if pt.AlbumUri != "" {
-			albumURISet[pt.AlbumUri] = struct{}{}
-		}
-		if pt.ArtistUri != "" {
-			artistURISet[pt.ArtistUri] = struct{}{}
-		}
+		pts = append(pts, librespot.ContextTrackToProvidedTrack(cr.Type(), ct))
 	}
 
-	// Build one batch request with all entities.
-	var entities []*extmetadatapb.EntityRequest
-	for _, uri := range trackURIs {
-		entities = append(entities, &extmetadatapb.EntityRequest{
-			EntityUri: uri,
+	// --- Phase 1: batch-fetch all tracks ---
+	trackEntities := make([]*extmetadatapb.EntityRequest, 0, len(pts))
+	for _, pt := range pts {
+		trackEntities = append(trackEntities, &extmetadatapb.EntityRequest{
+			EntityUri: pt.Uri,
 			Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_TRACK_V4}},
 		})
 	}
-	for uri := range albumURISet {
-		entities = append(entities, &extmetadatapb.EntityRequest{
-			EntityUri: uri,
-			Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_ALBUM_V4}},
-		})
-	}
-	for uri := range artistURISet {
-		entities = append(entities, &extmetadatapb.EntityRequest{
-			EntityUri: uri,
-			Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_ARTIST_V4}},
-		})
-	}
 
-	resp, err := c.sess.Spclient().ExtendedMetadata(ctx, &extmetadatapb.BatchedEntityRequest{
-		EntityRequest: entities,
+	trackResp, err := c.sess.Spclient().ExtendedMetadata(ctx, &extmetadatapb.BatchedEntityRequest{
+		EntityRequest: trackEntities,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("batch metadata request failed: %w", err)
+		return nil, fmt.Errorf("batch track metadata request failed: %w", err)
 	}
 
-	// Index responses by (kind, uri) for O(1) lookup.
-	tracks := make(map[string]*metadatapb.Track)
-	albums := make(map[string]*metadatapb.Album)
-	artists := make(map[string]*metadatapb.Artist)
-
-	lg := log.Ctx(ctx)
-
-	for _, arr := range resp.ExtendedMetadata {
+	trackPBs := make(map[string]*metadatapb.Track, len(pts))
+	for _, arr := range trackResp.ExtendedMetadata {
 		for _, ext := range arr.ExtensionData {
 			if ext.Header.StatusCode != 200 {
-				lg.Warn().
-					Str("uri", ext.EntityUri).
-					Int32("status", ext.Header.StatusCode).
-					Msg("metadata entity returned non-200")
+				lg.Warn().Str("uri", ext.EntityUri).Int32("status", ext.Header.StatusCode).Msg("track metadata non-200")
 				continue
 			}
+			var pb metadatapb.Track
+			if err := ext.ExtensionData.UnmarshalTo(&pb); err != nil {
+				lg.Warn().Err(err).Str("uri", ext.EntityUri).Msg("failed to unmarshal track")
+				continue
+			}
+			trackPBs[ext.EntityUri] = &pb
+		}
+	}
 
-			switch arr.ExtensionKind {
-			case extmetadatapb.ExtensionKind_TRACK_V4:
-				var pb metadatapb.Track
-				if err := ext.ExtensionData.UnmarshalTo(&pb); err != nil {
-					lg.Warn().Err(err).Str("uri", ext.EntityUri).Msg("failed to unmarshal track")
-					continue
-				}
-				tracks[ext.EntityUri] = &pb
+	// --- Phase 2: collect album/artist URIs from track protos, batch-fetch ---
+	albumURISet := make(map[string]struct{})
+	artistURISet := make(map[string]struct{})
 
-			case extmetadatapb.ExtensionKind_ALBUM_V4:
-				var pb metadatapb.Album
-				if err := ext.ExtensionData.UnmarshalTo(&pb); err != nil {
-					lg.Warn().Err(err).Str("uri", ext.EntityUri).Msg("failed to unmarshal album")
-					continue
-				}
-				albums[ext.EntityUri] = &pb
-
-			case extmetadatapb.ExtensionKind_ARTIST_V4:
-				var pb metadatapb.Artist
-				if err := ext.ExtensionData.UnmarshalTo(&pb); err != nil {
-					lg.Warn().Err(err).Str("uri", ext.EntityUri).Msg("failed to unmarshal artist")
-					continue
-				}
-				artists[ext.EntityUri] = &pb
+	for _, pb := range trackPBs {
+		if pb.Album != nil && len(pb.Album.Gid) > 0 {
+			albumURISet["spotify:album:"+librespot.GidToBase62(pb.Album.Gid)] = struct{}{}
+		}
+		for _, a := range pb.Artist {
+			if len(a.Gid) > 0 {
+				artistURISet["spotify:artist:"+librespot.GidToBase62(a.Gid)] = struct{}{}
 			}
 		}
 	}
 
-	// Assemble enriched tracks. Tracks that came back from the batch
-	// may reference album/artist URIs we didn't know about from the
-	// ProvidedTrack metadata — those are filled from the Track proto itself.
+	albums := make(map[string]*metadatapb.Album)
+	artists := make(map[string]*metadatapb.Artist)
+
+	if len(albumURISet)+len(artistURISet) > 0 {
+		var auxEntities []*extmetadatapb.EntityRequest
+		for uri := range albumURISet {
+			auxEntities = append(auxEntities, &extmetadatapb.EntityRequest{
+				EntityUri: uri,
+				Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_ALBUM_V4}},
+			})
+		}
+		for uri := range artistURISet {
+			auxEntities = append(auxEntities, &extmetadatapb.EntityRequest{
+				EntityUri: uri,
+				Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_ARTIST_V4}},
+			})
+		}
+
+		auxResp, err := c.sess.Spclient().ExtendedMetadata(ctx, &extmetadatapb.BatchedEntityRequest{
+			EntityRequest: auxEntities,
+		})
+		if err != nil {
+			lg.Warn().Err(err).Msg("batch album/artist metadata request failed, continuing without enrichment")
+		} else {
+			for _, arr := range auxResp.ExtendedMetadata {
+				for _, ext := range arr.ExtensionData {
+					if ext.Header.StatusCode != 200 {
+						lg.Warn().Str("uri", ext.EntityUri).Int32("status", ext.Header.StatusCode).Msg("aux metadata non-200")
+						continue
+					}
+					switch arr.ExtensionKind {
+					case extmetadatapb.ExtensionKind_ALBUM_V4:
+						var pb metadatapb.Album
+						if err := ext.ExtensionData.UnmarshalTo(&pb); err == nil {
+							albums[ext.EntityUri] = &pb
+						}
+					case extmetadatapb.ExtensionKind_ARTIST_V4:
+						var pb metadatapb.Artist
+						if err := ext.ExtensionData.UnmarshalTo(&pb); err == nil {
+							artists[ext.EntityUri] = &pb
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// --- Assemble enriched tracks ---
 	result := make([]types.EnrichedTrack, 0, len(pts))
 
 	for _, pt := range pts {
-		pbTrack, ok := tracks[pt.Uri]
+		pbTrack, ok := trackPBs[pt.Uri]
 		if !ok {
 			lg.Warn().Str("uri", pt.Uri).Msg("track missing from batch response, skipping")
 			continue
@@ -278,34 +271,16 @@ func (c *clientImpl) EnrichPage(
 		t.FromProto(pbTrack)
 		et := types.EnrichedTrack{Track: &t}
 
-		// Album — prefer the URI from ProvidedTrack, fall back to parsed track
-		albumURI := pt.AlbumUri
-		if albumURI == "" {
-			albumURI = t.Album.URI
-		}
-		if pbAlbum, ok := albums[albumURI]; ok {
+		// Album
+		if pbAlbum, ok := albums[t.Album.URI]; ok {
 			var a types.Album
 			a.FromProto(pbAlbum)
 			et.FullAlbum = &a
 		}
 
 		// Artists
-		seen := make(map[string]struct{})
-		var artURIs []string
-		if pt.ArtistUri != "" {
-			seen[pt.ArtistUri] = struct{}{}
-			artURIs = append(artURIs, pt.ArtistUri)
-		}
 		for _, ar := range t.Artists {
-			if ar.URI != "" {
-				if _, dup := seen[ar.URI]; !dup {
-					seen[ar.URI] = struct{}{}
-					artURIs = append(artURIs, ar.URI)
-				}
-			}
-		}
-		for _, uri := range artURIs {
-			if pbArt, ok := artists[uri]; ok {
+			if pbArt, ok := artists[ar.URI]; ok {
 				var a types.Artist
 				a.FromProto(pbArt)
 				et.FullArtists = append(et.FullArtists, &a)

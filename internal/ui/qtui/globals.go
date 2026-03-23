@@ -1,7 +1,5 @@
 package qtui
 
-import (
-	qt "github.com/mappu/miqt/qt6"
-)
+import "github.com/pyrorhythm/spqt/pkg/qtw"
 
-var font = qt.NewQFont2("IBM Plex Sans")
+var font = qtw.Font("IBM Plex Sans").Build()

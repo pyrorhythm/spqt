@@ -7,6 +7,7 @@ import (
 
 	"github.com/pyrorhythm/spqt/internal/types"
 	"github.com/pyrorhythm/spqt/internal/vm"
+	"github.com/pyrorhythm/spqt/pkg/qtw"
 )
 
 type AppWindow struct {
@@ -30,15 +31,15 @@ func (AppWindow) Create(ctx context.Context, qa *qt.QApplication, auth types.Aut
 		qa: qa,
 	}
 
-	pages := qt.NewQStackedWidget2()
-	pages.AddWidget(buildAuthPage(ctx, aw.VM.Auth))
-	pages.AddWidget(buildPlayerPage(ctx, aw.VM.Player, aw.VM.TrackList))
+	pages := qtw.NewPages().
+		Page("auth", buildAuthPage(ctx, aw.VM.Auth)).
+		Page("player", buildPlayerPage(ctx, aw.VM.Player, aw.VM.TrackList))
 
 	aw.VM.Current.OnChange(func(cvm vm.CurrentViewModel) {
-		pages.SetCurrentIndex(cvm.Index())
+		pages.Show(string(cvm))
 	})
 
-	aw.MW.SetCentralWidget(pages.QWidget)
+	aw.MW.SetCentralWidget(pages.Widget())
 
 	return aw
 }
