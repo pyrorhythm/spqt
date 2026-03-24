@@ -21,10 +21,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
-	aw := qtui.AppWindow{}.Create(ctx, qt.NewQApplication(os.Args), respot.NewAuth())
+	aw := qtui.CreateAppWindow(ctx, respot.Authorize, respot.NewClient)
+	aw.MW.SetWindowFlags(qt.FramelessWindowHint)
 	aw.MW.Show()
 	aw.VM.Auth.LoginCmd.Execute(ctx)
 	aw.SetTheme(qtui.AquaDark)
+	// aw.MW.SetStyleSheet("QMAborder-radius: 15px;")
 
 	qt.QApplication_Exec()
 }

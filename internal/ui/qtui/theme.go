@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-//go:embed style.tqss
+//go:embed style.qss
 var styleTemplate string
 
 type Theme struct {
@@ -118,4 +118,3 @@ func (t Theme) QSS() string {
 	)
 	return r.Replace(styleTemplate)
 }
-

@@ -150,6 +150,8 @@ func addBoxItem(box *qt.QBoxLayout, v any) {
 		box.AddWidget(w)
 	case *qt.QLayout:
 		box.AddLayout(w)
+	case Widgeter:
+		box.AddWidget(w.Widget())
 	case *BoxBuilder:
 		box.AddLayout(w.box.QLayout)
 	case *GridBuilder:
@@ -170,6 +172,8 @@ func mustWidget(v any) *qt.QWidget {
 	switch w := v.(type) {
 	case *qt.QWidget:
 		return w
+	case Widgeter:
+		return w.Widget()
 	default:
 		return extract[qt.QWidget](v, "QWidget")
 	}

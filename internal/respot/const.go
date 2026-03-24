@@ -1,22 +1,20 @@
 package respot
 
 import (
-	"fmt"
-
 	librespot "github.com/devgianlu/go-librespot"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/spotify"
 )
 
 const (
-	cacheDir        = "./cache"
+	cacheDir        = "./.spqt"
 	deviceIDFile    = "deviceID"
 	credentialsFile = "spotifyCredentials"
 )
 
 var oa2Conf = &oauth2.Config{
 	ClientID:    librespot.ClientIdHex,
-	RedirectURL: fmt.Sprintf("http://127.0.0.1:9292/login"),
+	RedirectURL: "http://127.0.0.1:9292/login",
 	Scopes: []string{
 		"app-remote-control",
 		"playlist-modify",

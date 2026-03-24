@@ -18,6 +18,10 @@ func NewRespotLogger(logger *zerolog.Logger) respot.Logger {
 	return &respotLogger{logger: logger}
 }
 
+func Logger() respot.Logger {
+	return &respotLogger{logger: log.Logger()}
+}
+
 func FromContext(ctx context.Context) respot.Logger {
 	return NewRespotLogger(log.Ctx(ctx))
 }

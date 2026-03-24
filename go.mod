@@ -2,6 +2,8 @@ module github.com/pyrorhythm/spqt
 
 go 1.26.1
 
+replace github.com/devgianlu/go-librespot => ./vendor-libs/go-librespot
+
 require (
 	github.com/devgianlu/go-librespot v0.7.1
 	github.com/mappu/miqt v0.13.0

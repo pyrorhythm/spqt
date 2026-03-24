@@ -26,14 +26,8 @@ import (
 	"github.com/pyrorhythm/spqt/pkg/log"
 )
 
-type Auth struct{}
-
-func NewAuth() *Auth {
-	return &Auth{}
-}
-
-func (a *Auth) Authorize(ctx context.Context) <-chan types.Event {
-	ch := make(chan types.Event, 4)
+func Authorize(ctx context.Context) <-chan types.AuthEvent {
+	ch := make(chan types.AuthEvent, 4)
 
 	go func() {
 		var (
@@ -88,7 +82,7 @@ func (a *Auth) Authorize(ctx context.Context) <-chan types.Event {
 	return ch
 }
 
-func oauthApFn(ctx context.Context, eventChan chan types.Event) func(*ap.Accesspoint) error {
+func oauthApFn(ctx context.Context, eventChan chan types.AuthEvent) func(*ap.Accesspoint) error {
 	return func(ap *ap.Accesspoint) error {
 		var (
 			code string

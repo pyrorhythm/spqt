@@ -1,6 +1,6 @@
 package types
 
-type Event interface {
+type AuthEvent interface {
 	iAmAnEvent()
 }
 

@@ -3,11 +3,13 @@ package types
 import (
 	"context"
 
+	"github.com/devgianlu/go-librespot/player"
 	"github.com/devgianlu/go-librespot/spclient"
 )
 
 type Client interface {
 	Close()
+	Player() *player.Player
 	Search(ctx context.Context, query string) (*spclient.ContextResolver, error)
 	LikedTracks(ctx context.Context, artistId ...string) (*spclient.ContextResolver, error)
 	ResolveContext(ctx context.Context, uri string) (*spclient.ContextResolver, error)

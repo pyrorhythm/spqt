@@ -26,12 +26,14 @@ func (p *CmpProp[T, _]) Set(v T) {
 	}
 	p.value = v
 
-	for _, efn := range p.exactListeners[p.cmp.Key(v)] {
-		efn()
-	}
-	for _, fn := range p.listeners {
-		fn(v)
-	}
+	go func() {
+		for _, efn := range p.exactListeners[p.cmp.Key(v)] {
+			efn()
+		}
+		for _, fn := range p.listeners {
+			fn(v)
+		}
+	}()
 }
 
 func (p *CmpProp[T, _]) OnChange(fn func(T)) {

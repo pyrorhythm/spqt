@@ -2,10 +2,12 @@ package qtui
 
 import (
 	"context"
+	"os"
 
 	qt "github.com/mappu/miqt/qt6"
 
 	"github.com/pyrorhythm/spqt/internal/types"
+	"github.com/pyrorhythm/spqt/internal/ui/qtui/components"
 	"github.com/pyrorhythm/spqt/internal/vm"
 	"github.com/pyrorhythm/spqt/pkg/qtw"
 )
@@ -24,19 +26,24 @@ func (w AppWindow) SetTheme(t Themable) {
 	w.qa.SetStyleSheet(t.QSS())
 }
 
-func (AppWindow) Create(ctx context.Context, qa *qt.QApplication, auth types.Authenticator) *AppWindow {
+func CreateAppWindow(
+	ctx context.Context,
+	auth types.Authenticator,
+	clientFactory func(types.Session) types.Client,
+) *AppWindow {
+	qa := qt.NewQApplication(os.Args)
 	aw := &AppWindow{
 		MW: qt.NewQMainWindow2(),
-		VM: vm.New(auth),
+		VM: vm.New(ctx, auth, clientFactory),
 		qa: qa,
 	}
 
 	pages := qtw.NewPages().
-		Page("auth", buildAuthPage(ctx, aw.VM.Auth)).
-		Page("player", buildPlayerPage(ctx, aw.VM.Player, aw.VM.TrackList))
+		Page("auth", authPage(ctx, aw.VM.Auth)).
+		Page("main", components.NewShell(ctx, aw.VM.Shell).Widget())
 
-	aw.VM.Current.OnChange(func(cvm vm.CurrentViewModel) {
-		pages.Show(string(cvm))
+	aw.VM.Current.OnChange(func(m vm.MetaVM) {
+		pages.Show(m.String())
 	})
 
 	aw.MW.SetCentralWidget(pages.Widget())

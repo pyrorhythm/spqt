@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	librespot "github.com/devgianlu/go-librespot"
+	"github.com/devgianlu/go-librespot/player"
 	connectpb "github.com/devgianlu/go-librespot/proto/spotify/connectstate"
 	extmetadatapb "github.com/devgianlu/go-librespot/proto/spotify/extendedmetadata"
 	metadatapb "github.com/devgianlu/go-librespot/proto/spotify/metadata"
@@ -17,14 +18,25 @@ import (
 
 type clientImpl struct {
 	sess types.Session
+	p    *player.Player
+}
+
+func (c *clientImpl) Player() *player.Player {
+	return c.p
 }
 
 func (c *clientImpl) Close() {
 	c.sess.Close()
 }
 
-func NewClient(sess types.Session) *clientImpl {
-	return &clientImpl{sess: sess}
+func NewClient(sess types.Session) types.Client {
+	pl, err := newPlayer(sess)
+
+	if err != nil {
+		log.Logger().Error().Stack().Err(err).Msg("failed to create new player")
+	}
+
+	return &clientImpl{sess: sess, p: pl}
 }
 
 func (c *clientImpl) resolve(ctx context.Context, sc *connectpb.Context) (*spclient.ContextResolver, error) {
@@ -139,9 +151,10 @@ func (c *clientImpl) FetchArtistMetadata(ctx context.Context, uri string) (*type
 }
 
 // EnrichPage fetches a page from the resolver, then issues batched metadata
-// requests. Phase 1: fetch all track metadata. Phase 2: extract album/artist
-// URIs from the track protos and batch-fetch those (ProvidedTrack metadata
-// from context-resolve often lacks album_uri/artist_uri).
+// requests.
+//
+//  - fetch all track metadata
+//  - extract album/artist URIs from the track protos and batch-fetch those
 func (c *clientImpl) EnrichPage(
 	ctx context.Context,
 	cr *spclient.ContextResolver,
@@ -237,7 +250,8 @@ func (c *clientImpl) EnrichPage(
 			for _, arr := range auxResp.ExtendedMetadata {
 				for _, ext := range arr.ExtensionData {
 					if ext.Header.StatusCode != 200 {
-						lg.Warn().Str("uri", ext.EntityUri).Int32("status", ext.Header.StatusCode).Msg("aux metadata non-200")
+						lg.Warn().Str("uri", ext.EntityUri).Int32("status",
+							ext.Header.StatusCode).Msg("aux metadata non-200")
 						continue
 					}
 					switch arr.ExtensionKind {

@@ -10,8 +10,8 @@ import (
 	"github.com/pyrorhythm/spqt/pkg/qtw"
 )
 
-func buildAuthPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
-	page := qtw.Widget()
+func authPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
+	page := qtw.Widget().Build()
 
 	status := qtw.EmptyLabel().Align(qt.AlignCenter).Font(font).Build()
 	retryBtn := qtw.Button("Retry").Visible(false).

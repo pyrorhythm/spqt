@@ -2,6 +2,8 @@ package qtw
 
 import (
 	qt "github.com/mappu/miqt/qt6"
+
+	"github.com/pyrorhythm/spqt/pkg/reactive"
 )
 
 type LabelBuilder struct{ lbl *qt.QLabel }
@@ -46,6 +48,16 @@ func (b *LabelBuilder) Pixmap(pm *qt.QPixmap) *LabelBuilder {
 
 func (b *LabelBuilder) WordWrap(on bool) *LabelBuilder {
 	b.lbl.SetWordWrap(on)
+	return b
+}
+
+func (b *LabelBuilder) Property(name string, vart *qt.QVariant) *LabelBuilder {
+	b.lbl.SetProperty(name, vart)
+	return b
+}
+
+func (b *LabelBuilder) BindText(prop *reactive.Prop[string]) *LabelBuilder {
+	Bind(prop, b.lbl.SetText)
 	return b
 }
 
@@ -94,6 +106,22 @@ func (b *ButtonBuilder) OnClick(fn func()) *ButtonBuilder {
 	return b
 }
 
+func (b *ButtonBuilder) BindEnabled(prop *reactive.Prop[bool]) *ButtonBuilder {
+	Bind(prop, func(v bool) { b.btn.QWidget.SetEnabled(v) })
+	return b
+}
+
+func (b *ButtonBuilder) BindIcon(prop *reactive.Prop[bool], whenTrue, whenFalse *qt.QIcon) *ButtonBuilder {
+	Bind(prop, func(v bool) {
+		if v {
+			b.btn.SetIcon(whenTrue)
+		} else {
+			b.btn.SetIcon(whenFalse)
+		}
+	})
+	return b
+}
+
 func (b *ButtonBuilder) Build() *qt.QPushButton { return b.btn }
 
 type SliderBuilder struct{ s *qt.QSlider }
@@ -117,6 +145,17 @@ func (b *SliderBuilder) Value(v int) *SliderBuilder {
 
 func (b *SliderBuilder) Name(n string) *SliderBuilder {
 	b.s.SetObjectName(*qt.NewQAnyStringView3(n))
+	return b
+}
+
+func (b *SliderBuilder) BindValue(prop *reactive.Prop[int32]) *SliderBuilder {
+	Bind(prop, func(v int32) { b.s.SetValue(int(v)) })
+	return b
+}
+
+func (b *SliderBuilder) BindRange(min, max *reactive.Prop[int32]) *SliderBuilder {
+	Bind(min, func(v int32) { b.s.SetMinimum(int(v)) })
+	Bind(max, func(v int32) { b.s.SetMaximum(int(v)) })
 	return b
 }
 

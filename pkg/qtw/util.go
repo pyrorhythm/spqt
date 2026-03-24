@@ -43,14 +43,50 @@ func ScrollArea(widget *qt.QWidget) *qt.QScrollArea {
 	return sa
 }
 
-// Widget creates an empty QWidget — convenience for container/page construction.
-func Widget() *qt.QWidget {
-	return qt.NewQWidget2()
+type WidgetBuilder struct{ w *qt.QWidget }
+
+func Widget() *WidgetBuilder {
+	return &WidgetBuilder{w: qt.NewQWidget2()}
 }
 
-// WidgetNamed creates an empty QWidget with an object name.
-func WidgetNamed(name string) *qt.QWidget {
-	w := qt.NewQWidget2()
-	w.SetObjectName(*qt.NewQAnyStringView3(name))
-	return w
+func (b *WidgetBuilder) Name(n string) *WidgetBuilder {
+	b.w.SetObjectName(*qt.NewQAnyStringView3(n))
+	return b
 }
+
+func (b *WidgetBuilder) FixedSize(w, h int) *WidgetBuilder {
+	b.w.SetFixedSize2(w, h)
+	return b
+}
+
+func (b *WidgetBuilder) MinSize(w, h int) *WidgetBuilder {
+	b.w.SetMinimumSize2(w, h)
+	return b
+}
+
+func (b *WidgetBuilder) MaxSize(w, h int) *WidgetBuilder {
+	b.w.SetMaximumSize2(w, h)
+	return b
+}
+
+func (b *WidgetBuilder) Layout(l *qt.QLayout) *WidgetBuilder {
+	b.w.SetLayout(l)
+	return b
+}
+
+func (b *WidgetBuilder) Visible(on bool) *WidgetBuilder {
+	b.w.SetVisible(on)
+	return b
+}
+
+func (b *WidgetBuilder) FixedHeight(h int) *WidgetBuilder {
+	b.w.SetFixedHeight(h)
+	return b
+}
+
+func (b *WidgetBuilder) FixedWidth(w int) *WidgetBuilder {
+	b.w.SetFixedWidth(w)
+	return b
+}
+
+func (b *WidgetBuilder) Build() *qt.QWidget { return b.w }

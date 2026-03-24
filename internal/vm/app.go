@@ -1,23 +1,28 @@
 package vm
 
 import (
-	"github.com/pyrorhythm/spqt/internal/respot"
+	"context"
+
 	"github.com/pyrorhythm/spqt/internal/types"
 	"github.com/pyrorhythm/spqt/pkg/reactive"
 )
 
-type CurrentViewModel string
+type MetaVM string
+
+func (m MetaVM) String() string {
+	return string(m)
+}
 
 const (
-	CVMAuth   CurrentViewModel = "auth"
-	CVMPlayer CurrentViewModel = "player"
+	MetaAuth MetaVM = "auth"
+	MetaMain MetaVM = "main"
 )
 
-func (cvm CurrentViewModel) Index() int {
-	switch cvm {
-	case CVMAuth:
+func (m MetaVM) Index() int {
+	switch m {
+	case MetaAuth:
 		return 0
-	case CVMPlayer:
+	case MetaMain:
 		return 1
 	}
 
@@ -25,22 +30,20 @@ func (cvm CurrentViewModel) Index() int {
 }
 
 type App struct {
-	Current   *reactive.Prop[CurrentViewModel]
-	Auth      *Auth
-	Player    *Player
-	TrackList *TrackList
+	Current *reactive.Prop[MetaVM]
+	Auth    *Auth
+	Shell   *Shell
 }
 
-func New(auth types.Authenticator) *App {
-	app := &App{Current: reactive.NewProp[CurrentViewModel](CVMAuth)}
+func New(ctx context.Context, auth types.Authenticator, clientFactory func(types.Session) types.Client) *App {
+	app := &App{Current: reactive.NewProp(MetaAuth)}
 
 	app.Auth = newAuthVM(auth)
-	app.Player = newPlayerVM()
-	app.TrackList = newTrackListVM(app.Player)
+	app.Shell = newShell()
 
 	app.Auth.State.OnExact(ASReady, func() {
-		app.Current.Set(CVMPlayer)
-		app.TrackList.SetClient(respot.NewClient(app.Auth.Session))
+		app.Shell.BindClient(ctx, clientFactory(app.Auth.Session))
+		app.Current.Set(MetaMain)
 	})
 
 	return app
