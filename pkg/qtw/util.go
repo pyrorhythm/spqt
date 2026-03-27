@@ -29,7 +29,7 @@ func Name(widget *qt.QWidget, name string) *qt.QWidget {
 }
 
 // FormatDuration formats milliseconds as "m:ss".
-func FormatDuration(ms int32) string {
+func FormatDuration(ms int64) string {
 	secs := ms / 1000
 	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 }
@@ -39,7 +39,7 @@ func ScrollArea(widget *qt.QWidget) *qt.QScrollArea {
 	sa := qt.NewQScrollArea2()
 	sa.SetWidget(widget)
 	sa.SetWidgetResizable(true)
-	sa.QFrame.SetFrameShape(qt.QFrame__NoFrame)
+	sa.SetFrameShape(qt.QFrame__NoFrame)
 	return sa
 }
 
@@ -89,4 +89,18 @@ func (b *WidgetBuilder) FixedWidth(w int) *WidgetBuilder {
 	return b
 }
 
-func (b *WidgetBuilder) Build() *qt.QWidget { return b.w }
+func (b *WidgetBuilder) StyleSheet(ss string) *WidgetBuilder {
+	b.w.SetStyleSheet(ss)
+	return b
+}
+
+func (b *WidgetBuilder) OnEvent(fn func(func(*qt.QEvent) bool, *qt.QEvent) bool) *WidgetBuilder {
+	b.w.OnEvent(fn)
+	return b
+}
+
+func (b *WidgetBuilder) Q() *qt.QWidget { return b.w }
+
+func QVarStr(s string) *qt.QVariant {
+	return qt.NewQVariant14(s)
+}

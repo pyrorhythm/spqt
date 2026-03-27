@@ -6,17 +6,8 @@ import (
 
 type SentinelBool uint
 
-func (s SentinelBool) Unset() bool {
-	return s == Unset
-}
-
-func (s SentinelBool) Value() bool {
-	if s == True {
-		return true
-	}
-
-	return false
-}
+func (s SentinelBool) Unset() bool { return s == Unset }
+func (s SentinelBool) Value() bool { return s == True }
 
 func (s *SentinelBool) Set(b bool) {
 	if b {
@@ -35,14 +26,16 @@ const (
 type CtxCommand struct {
 	execute     func(ctx context.Context)
 	canExec     func(ctx context.Context) bool
-	listeners   []func(bool)
+	nextID      uint64
+	listeners   map[uint64]func(bool)
 	lastCanExec SentinelBool
 }
 
 func NewCtxCommand(execute func(ctx context.Context), canExecute func(ctx context.Context) bool) *CtxCommand {
 	c := &CtxCommand{
-		execute: execute,
-		canExec: canExecute,
+		execute:   execute,
+		canExec:   canExecute,
+		listeners: make(map[uint64]func(bool)),
 	}
 	c.lastCanExec = Unset
 
@@ -64,7 +57,6 @@ func (c *CtxCommand) CanExecute(ctx context.Context) bool {
 }
 
 // Refresh re-evaluates CanExecute and notifies listeners if it changed.
-// Call this after mutating state that affects the condition.
 func (c *CtxCommand) Refresh(ctx context.Context) {
 	cur := c.CanExecute(ctx)
 	if !c.lastCanExec.Unset() && c.lastCanExec.Value() == cur {
@@ -76,6 +68,11 @@ func (c *CtxCommand) Refresh(ctx context.Context) {
 	}
 }
 
-func (c *CtxCommand) OnCanExecuteChanged(fn func(canExec bool)) {
-	c.listeners = append(c.listeners, fn)
+func (c *CtxCommand) OnCanExecuteChanged(fn func(canExec bool)) func() {
+	id := c.nextID
+	c.nextID++
+	c.listeners[id] = fn
+	return func() {
+		delete(c.listeners, id)
+	}
 }

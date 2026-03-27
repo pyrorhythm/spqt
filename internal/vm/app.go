@@ -3,26 +3,32 @@ package vm
 import (
 	"context"
 
+	metadatapb "github.com/devgianlu/go-librespot/proto/spotify/metadata"
+	"github.com/dgraph-io/badger/v4"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/pyrorhythm/spqt/internal/types"
+	"github.com/pyrorhythm/spqt/pkg/cache"
+	"github.com/pyrorhythm/spqt/pkg/log"
 	"github.com/pyrorhythm/spqt/pkg/reactive"
 )
 
-type MetaVM string
+type AppState string
 
-func (m MetaVM) String() string {
+func (m AppState) String() string {
 	return string(m)
 }
 
 const (
-	MetaAuth MetaVM = "auth"
-	MetaMain MetaVM = "main"
+	StateAuth AppState = "auth"
+	StateMain AppState = "main"
 )
 
-func (m MetaVM) Index() int {
+func (m AppState) Index() int {
 	switch m {
-	case MetaAuth:
+	case StateAuth:
 		return 0
-	case MetaMain:
+	case StateMain:
 		return 1
 	}
 
@@ -30,20 +36,42 @@ func (m MetaVM) Index() int {
 }
 
 type App struct {
-	Current *reactive.Prop[MetaVM]
-	Auth    *Auth
-	Shell   *Shell
+	State        *reactive.Prop[AppState]
+	Auth         *Auth
+	Player       *Player
+	Nav          *reactive.Prop[NavState]
+	Client       types.Client
+	Images       *ImageService
+	LikedTracks  *TrackListVM
+	SearchResults *TrackListVM
 }
 
-func New(ctx context.Context, auth types.Authenticator, clientFactory func(types.Session) types.Client) *App {
-	app := &App{Current: reactive.NewProp(MetaAuth)}
+func New(ctx context.Context, auth types.Authenticator, clientFactory func(context.Context, types.Session) types.Client, db *badger.DB) *App {
+	ctx = log.Span(ctx, "vm")
 
-	app.Auth = newAuthVM(auth)
-	app.Shell = newShell()
+	trackLRU := cache.NewLRU(db, "tracks:liked:", 50,
+		func(t *metadatapb.Track) []byte { b, _ := proto.Marshal(t); return b },
+		func(b []byte) *metadatapb.Track { var t metadatapb.Track; _ = proto.Unmarshal(b, &t); return &t },
+	)
+
+	app := &App{
+		State:        reactive.NewProp(StateAuth),
+		Player:       newPlayer(),
+		Nav:          reactive.NewProp(NavHome),
+		Images:       NewImageService(ctx, db),
+		LikedTracks:  NewTrackListVM(trackLRU),
+		SearchResults: NewTrackListVM(cache.NewLRU(db, "tracks:search:", 200,
+			func(t *metadatapb.Track) []byte { b, _ := proto.Marshal(t); return b },
+			func(b []byte) *metadatapb.Track { var t metadatapb.Track; _ = proto.Unmarshal(b, &t); return &t },
+		)),
+	}
+
+	app.Auth = newAuthVM(ctx, auth)
 
 	app.Auth.State.OnExact(ASReady, func() {
-		app.Shell.BindClient(ctx, clientFactory(app.Auth.Session))
-		app.Current.Set(MetaMain)
+		app.Client = clientFactory(ctx, app.Auth.Session)
+		app.Player.BindClient(ctx, app.Client)
+		app.State.Set(StateMain)
 	})
 
 	return app

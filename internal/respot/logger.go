@@ -18,11 +18,11 @@ func NewRespotLogger(logger *zerolog.Logger) respot.Logger {
 	return &respotLogger{logger: logger}
 }
 
-func Logger() respot.Logger {
+func logger() respot.Logger {
 	return &respotLogger{logger: log.Logger()}
 }
 
-func FromContext(ctx context.Context) respot.Logger {
+func fromContext(ctx context.Context) respot.Logger {
 	return NewRespotLogger(log.Ctx(ctx))
 }
 
@@ -66,8 +66,8 @@ func (l *respotLogger) Error(args ...interface{}) {
 	l.logger.Error().Msg(formatArgs(args...))
 }
 
-func (l *respotLogger) WithField(key string, value interface{}) respot.Logger {
-	return &respotLogger{logger: new(l.logger.With().Interface(key, value).Logger())}
+func (l *respotLogger) WithField(key string, value any) respot.Logger {
+	return &respotLogger{logger: new(l.logger.With().Any(key, value).Logger())}
 }
 
 func (l *respotLogger) WithError(err error) respot.Logger {

@@ -2,6 +2,8 @@ package qtw
 
 import qt "github.com/mappu/miqt/qt6"
 
+const DefaultSans = "IBM Plex Sans"
+
 // FontBuilder constructs a QFont via chaining.
 type FontBuilder struct{ f *qt.QFont }
 
@@ -35,4 +37,4 @@ func (b *FontBuilder) Weight(w qt.QFont__Weight) *FontBuilder {
 	return b
 }
 
-func (b *FontBuilder) Build() *qt.QFont { return b.f }
+func (b *FontBuilder) Q() *qt.QFont { return b.f }

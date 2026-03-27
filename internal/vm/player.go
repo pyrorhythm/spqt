@@ -2,11 +2,12 @@ package vm
 
 import (
 	"context"
-	"math/big"
 	"net/http"
-	"strings"
+	"time"
 
 	respot "github.com/devgianlu/go-librespot"
+	"github.com/devgianlu/go-librespot/player"
+	metadatapb "github.com/devgianlu/go-librespot/proto/spotify/metadata"
 
 	"github.com/pyrorhythm/spqt/internal/types"
 	"github.com/pyrorhythm/spqt/pkg/log"
@@ -23,15 +24,21 @@ const (
 )
 
 type Player struct {
-	Current   *reactive.CmpProp[types.EnrichedTrack, string]
+	Current   *reactive.CmpProp[*metadatapb.Track, string]
 	IsPlaying *reactive.Prop[bool]
-	Progress  *reactive.Prop[int32]
+	Progress  *reactive.Prop[int64]
 	Volume    *reactive.Prop[uint32]
 	CanNext   *reactive.Prop[bool]
 
 	PlayerCmd *reactive.ECommand[playerCmd]
 
 	c types.Client
+}
+
+func (p *Player) SeekPos(posMs int64) {
+	if p.c != nil {
+		p.c.Player().SeekMs(posMs)
+	}
 }
 
 func (p *Player) Exec(pc playerCmd) func() {
@@ -42,24 +49,52 @@ func (p *Player) Exec(pc playerCmd) func() {
 
 func newPlayer() *Player {
 	return &Player{
-		Current:   reactive.NewUProp(types.EnrichedTrack{}, types.TrackComparator{}),
+		Current:   reactive.NewUProp(nil, types.TrackComparator{}),
 		IsPlaying: reactive.NewProp(false),
-		Progress:  reactive.NewProp[int32](0),
+		Progress:  reactive.NewProp[int64](0),
 		Volume:    reactive.NewProp[uint32](50),
 		CanNext:   reactive.NewProp(true),
 		PlayerCmd: reactive.NewECommand[playerCmd](),
 	}
 }
 
+func (p *Player) Client() types.Client {
+	return p.c
+}
+
+func (p *Player) eventListener(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-p.c.Player().Receive():
+			log.Trace(ctx).Int("type", int(e.Type)).Msg("event")
+			switch e.Type {
+			case player.EventTypePlay, player.EventTypeResume:
+				p.IsPlaying.Set(true)
+			case player.EventTypeStop, player.EventTypePause:
+				p.IsPlaying.Set(false)
+			case player.EventTypeNotPlaying:
+				p.IsPlaying.Set(false)
+				p.Current.Set(nil)
+			}
+		}
+	}
+}
+
 func (p *Player) BindClient(ctx context.Context, c types.Client) {
+	ctx = log.Span(ctx, "player")
+
 	p.c = c
+	log.Trace(ctx).Msg("registering commands")
 
 	p.PlayerCmd.Register(PCPlayPause, reactive.NewCommand(func() {
 		if p.IsPlaying.Get() {
+			log.Trace(ctx).Msg("cmd: pause")
 			c.Player().Pause()
 			return
 		}
-
+		log.Trace(ctx).Msg("cmd: play")
 		c.Player().Play()
 	}, nil))
 
@@ -75,84 +110,28 @@ func (p *Player) BindClient(ctx context.Context, c types.Client) {
 		// TODO: integrate with track queue
 	}, nil))
 
-	p.Current.OnChange(func(et types.EnrichedTrack) {
-		parts := strings.Split(et.URI, ":")
-		var i big.Int
-		_, _ = i.SetString(parts[2], 62)
+	p.Progress.Poll(ctx, time.Second, c.Player().PositionMs)
 
-		sid := respot.SpotifyIdFromGid(respot.SpotifyIdTypeTrack, i.FillBytes(make([]byte, 16)))
+	p.Current.OnChange(func(pb *metadatapb.Track) { p.setStream(ctx, pb) })
 
-		// log.Logger().Debug().Any("sid", sid).Bytes("id", sid.Id()).Send()
-
-		str, err := p.c.Player().NewStream(ctx, &http.Client{}, sid, 320, 0)
-		if err != nil {
-			log.Logger().Error().Stack().Err(err).Send()
-			return
-		}
-
-		err = p.c.Player().SetPrimaryStream(str.Source, false, false)
-		if err != nil {
-			log.Logger().Error().Stack().Err(err).Send()
-		}
-	})
+	log.Trace(ctx).Msg("starting event listener")
+	go p.eventListener(ctx)
 }
 
-const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-
-func encode(input []byte) string {
-	if len(input) == 0 {
-		return ""
+func (p *Player) setStream(ctx context.Context, pb *metadatapb.Track) {
+	if pb == nil {
+		return
 	}
-
-	value := new(big.Int).SetBytes(input)
-	var result strings.Builder
-
-	for value.Cmp(big.NewInt(0)) > 0 {
-		mod := new(big.Int)
-		value.DivMod(value, big.NewInt(62), mod)
-		result.WriteByte(BASE62[mod.Int64()])
+	sid := respot.SpotifyIdFromGid(respot.SpotifyIdTypeTrack, pb.Gid)
+	log.Trace(ctx).Str("track", pb.GetName()).Str("sid", sid.Uri()).Msg("new stream")
+	str, err := p.c.Player().NewStream(ctx, &http.Client{}, sid, 320, 0)
+	if err != nil {
+		log.Error(ctx).Stack().Err(err).Msg("new stream failed")
+		return
 	}
-
-	for _, b := range input {
-		if b == 0 {
-			result.WriteByte(BASE62[0])
-		} else {
-			break
-		}
+	log.Trace(ctx).Msg("setting primary stream")
+	err = p.c.Player().SetPrimaryStream(str.Source, false, false)
+	if err != nil {
+		log.Error(ctx).Stack().Err(err).Msg("set primary stream failed")
 	}
-
-	encoded := result.String()
-	runes := []rune(encoded)
-	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
-		runes[i], runes[j] = runes[j], runes[i]
-	}
-	return string(runes)
-}
-
-func decode(input string) []byte {
-	if len(input) == 0 {
-		return []byte{}
-	}
-
-	value := big.NewInt(0)
-	for _, c := range input {
-		value.Mul(value, big.NewInt(62))
-		value.Add(value, big.NewInt(int64(strings.IndexRune(BASE62, c))))
-	}
-
-	zb62 := []rune(BASE62)[0]
-
-	decoded := value.Bytes()
-	leadingZeroes := 0
-	for _, c := range input {
-		if c == zb62 {
-			leadingZeroes++
-		} else {
-			break
-		}
-	}
-
-	result := make([]byte, leadingZeroes+len(decoded))
-	copy(result[leadingZeroes:], decoded)
-	return result
 }

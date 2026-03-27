@@ -92,7 +92,7 @@ func oauthApFn(ctx context.Context, eventChan chan types.AuthEvent) func(*ap.Acc
 
 		sctx, scl := context.WithCancel(ctx)
 
-		_, resCh, err := session.NewOAuth2Server(sctx, FromContext(ctx), 9292)
+		_, resCh, err := session.NewOAuth2Server(sctx, fromContext(ctx), 9292)
 		if err != nil {
 			scl()
 			return fmt.Errorf("failed to open oauth2 server: %w", err)
@@ -131,7 +131,7 @@ func getDeviceID() (id string, new bool) {
 func sessionInit(ctx context.Context, deviceId string, authApFn func(*ap.Accesspoint) error) (*sessionImpl, error) {
 	var err error
 
-	lg := FromContext(ctx)
+	lg := fromContext(ctx)
 
 	s := &sessionImpl{
 		deviceId:   deviceId,

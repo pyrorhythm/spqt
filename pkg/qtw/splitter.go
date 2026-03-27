@@ -31,6 +31,6 @@ func (sb *SplitterBuilder) WidgetF(w func() *qt.QWidget, stretchFactor int) *Spl
 	return sb
 }
 
-func (sb *SplitterBuilder) Build() *qt.QSplitter {
+func (sb *SplitterBuilder) Q() *qt.QSplitter {
 	return sb.s
 }

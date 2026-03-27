@@ -9,10 +9,7 @@ import (
 func BuildHome() *qt.QWidget {
 	return qtw.Widget().Layout(
 		qtw.VBox().Margins(24, 24, 24, 24).Spacing(16).Items(
-			qtw.Label("Good afternoon").
-				Property("heading", qt.NewQVariant14("true")).
-				Build(),
+			qtw.Label("Good afternoon").Property("heading", qt.NewQVariant14("true")).Q(),
 			qtw.Stretch(),
-		),
-	).Build()
+		)).Q()
 }

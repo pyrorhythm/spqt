@@ -58,12 +58,12 @@ func (b *TableBuilder) OnRowClick(fn func(row int)) *TableBuilder {
 	return b
 }
 
-func (b *TableBuilder) Build() *qt.QTableWidget { return b.t }
+func (b *TableBuilder) Q() *qt.QTableWidget { return b.t }
 
 // FillTable clears and fills a QTableWidget. render returns column values for each row.
 func FillTable(table *qt.QTableWidget, rows int, render func(row int) []string) {
 	table.SetRowCount(rows)
-	for i := 0; i < rows; i++ {
+	for i := range rows {
 		for j, val := range render(i) {
 			table.SetItem(i, j, qt.NewQTableWidgetItem2(val))
 		}

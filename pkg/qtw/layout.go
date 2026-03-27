@@ -21,7 +21,7 @@ func Space(px int) spacingItem { return spacingItem{px} }
 // BoxBuilder configures a QHBoxLayout or QVBoxLayout via chaining.
 type BoxBuilder struct {
 	box       *qt.QBoxLayout
-	stretches [][2]int // deferred SetStretch(index, factor) calls
+	stretches [][2]int // deferred Stretch(index, factor) calls
 }
 
 // VBox creates a vertical box layout builder.
@@ -61,13 +61,18 @@ func (b *BoxBuilder) Items(items ...any) *qt.QLayout {
 	return b.box.QLayout
 }
 
-// Build returns the layout without adding items.
-func (b *BoxBuilder) Build() *qt.QLayout {
+// Q returns the layout without adding items.
+func (b *BoxBuilder) Q() *qt.QLayout {
 	return b.box.QLayout
 }
 
-// SetStretch sets stretch factor for item at index (applied after Items()).
-func (b *BoxBuilder) SetStretch(index, factor int) *BoxBuilder {
+// Box returns the box without adding items.
+func (b *BoxBuilder) Box() *qt.QBoxLayout {
+	return b.box
+}
+
+// Stretch sets stretch factor for item at index (applied after Items()).
+func (b *BoxBuilder) Stretch(index, factor int) *BoxBuilder {
 	b.stretches = append(b.stretches, [2]int{index, factor})
 	return b
 }
@@ -132,7 +137,7 @@ func (g *GridBuilder) PutSpan(item any, row, col, rowSpan, colSpan int) *GridBui
 	return g
 }
 
-func (g *GridBuilder) Build() *qt.QLayout {
+func (g *GridBuilder) Q() *qt.QLayout {
 	return g.grid.QLayout
 }
 

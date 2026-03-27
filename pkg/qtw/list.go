@@ -32,10 +32,20 @@ func (l *ListWrapper) Widget() *qt.QListWidget {
 	return l.lw
 }
 
+func (l *ListWrapper) Margins(lt, tp, rt, bo int) *ListWrapper {
+	l.lw.SetContentsMargins(lt, tp, rt, bo)
+	return l
+}
+
 func (l *ListWrapper) Set(label string) {
 	if i, ok := l.labelIndex[label]; ok {
 		l.lw.SetCurrentRow(i)
 	}
+}
+
+func (l *ListWrapper) Stylesheet(ss string) *ListWrapper {
+	l.lw.SetStyleSheet(ss)
+	return l
 }
 
 func (l *ListWrapper) OnClick(f func(label string)) *ListWrapper {

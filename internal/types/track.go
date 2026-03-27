@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/hex"
+	"strings"
 	"time"
 
 	librespot "github.com/devgianlu/go-librespot"
@@ -11,81 +12,105 @@ import (
 	"github.com/pyrorhythm/spqt/pkg/reactive"
 )
 
+// Image is a CDN image extracted from proto Image messages.
 type Image struct {
 	URL    string
 	Width  int32
 	Height int32
 }
 
-type Track struct {
-	URI        string
-	Name       string
-	Album      Album
-	Artists    []ArtistRef
-	TrackNum   int32
-	DiscNum    int32
-	DurationMs int32
-	Popularity int32
-	Explicit   bool
+// ImagesFromProto converts proto Image messages to CDN-url Images.
+func ImagesFromProto(pbs []*metadatapb.Image) []Image {
+	if len(pbs) == 0 {
+		return nil
+	}
+	imgs := make([]Image, 0, len(pbs))
+	for _, img := range pbs {
+		imgs = append(imgs, Image{
+			URL:    "https://i.scdn.co/image/" + hex.EncodeToString(img.GetFileId()),
+			Width:  img.GetWidth(),
+			Height: img.GetHeight(),
+		})
+	}
+	return imgs
+}
+
+// TrackURI extracts the URI from a track proto.
+func TrackURI(pb *metadatapb.Track) string {
+	if pb == nil {
+		return ""
+	}
+	if pb.GetCanonicalUri() != "" {
+		return pb.GetCanonicalUri()
+	}
+	if len(pb.Gid) > 0 {
+		return librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, pb.Gid).Uri()
+	}
+	return ""
+}
+
+func AlbumURI(pb *metadatapb.Album) string {
+	if pb == nil || len(pb.Gid) == 0 {
+		return ""
+	}
+	return "spotify:album:" + librespot.GidToBase62(pb.Gid)
+}
+
+func ArtistURI(pb *metadatapb.Artist) string {
+	if pb == nil || len(pb.Gid) == 0 {
+		return ""
+	}
+	return "spotify:artist:" + librespot.GidToBase62(pb.Gid)
+}
+
+func AlbumCovers(pb *metadatapb.Album) []Image {
+	if pb == nil {
+		return nil
+	}
+	imgs := ImagesFromProto(pb.Cover)
+	if len(imgs) == 0 && pb.CoverGroup != nil {
+		imgs = ImagesFromProto(pb.CoverGroup.GetImage())
+	}
+	return imgs
+}
+
+func ArtistNames(pb *metadatapb.Track) string {
+	if pb == nil {
+		return "<*metadatapb.Track=nil>"
+	}
+	names := make([]string, 0, len(pb.GetArtist()))
+	for _, a := range pb.GetArtist() {
+		names = append(names, a.GetName())
+	}
+	return strings.Join(names, ", ")
 }
 
 type TrackComparator struct{}
 
-func (TrackComparator) Compare(a, b EnrichedTrack) int {
-	if a.Track == nil && b.Track == nil {
+func (TrackComparator) Compare(a, b *metadatapb.Track) int {
+	ua, ub := TrackURI(a), TrackURI(b)
+	if ua == ub {
 		return 0
 	}
-
-	if a.Track == nil {
+	if ua == "" {
 		return 1
 	}
-
-	if b.Track == nil {
+	if ub == "" {
 		return -1
 	}
-
-	if a.URI != b.URI {
-		if a.URI < b.URI {
-			return -1
-		}
-
-		return 1
+	if ua < ub {
+		return -1
 	}
-
-	return 0
+	return 1
 }
 
-func (TrackComparator) Key(a EnrichedTrack) string {
-	return a.URI
+func (TrackComparator) Key(a *metadatapb.Track) string {
+	return TrackURI(a)
 }
 
-var _ reactive.Comparator[EnrichedTrack, string] = (*TrackComparator)(nil)
+var _ reactive.Comparator[*metadatapb.Track, string] = (*TrackComparator)(nil)
 
-type ArtistRef struct {
-	URI  string
-	Name string
-}
-
-type Album struct {
-	URI        string
-	Name       string
-	Artists    []ArtistRef
-	Type       string
-	Label      string
-	Year       int
-	Covers     []Image
-	TrackCount int
-	Popularity int32
-}
-
-type Artist struct {
-	URI        string
-	Name       string
-	Popularity int32
-	Portraits  []Image
-	Genres     []string
-}
-
+// Playlist is a lightweight representation of a playlist.
 type Playlist struct {
 	URI         string
 	Name        string
@@ -95,125 +120,16 @@ type Playlist struct {
 	CreatedAt   time.Time
 }
 
-// --- Converters ---
-
-func (t *Track) FromProto(pb *metadatapb.Track) {
-	*t = Track{
-		Name:       pb.GetName(),
-		TrackNum:   pb.GetNumber(),
-		DiscNum:    pb.GetDiscNumber(),
-		DurationMs: pb.GetDuration(),
-		Popularity: pb.GetPopularity(),
-		Explicit:   pb.GetExplicit(),
-	}
-
-	if pb.GetCanonicalUri() != "" {
-		t.URI = pb.GetCanonicalUri()
-	} else if len(pb.Gid) > 0 {
-		t.URI = librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, pb.Gid).Uri()
-	}
-
-	if pb.Album != nil {
-		t.Album = Album{}
-		t.Album.FromProto(pb.Album)
-	}
-
-	for _, a := range pb.Artist {
-		t.Artists = append(t.Artists, artistRefFromProto(a))
-	}
-}
-
-func (a *Album) FromProto(pb *metadatapb.Album) {
-	*a = Album{
-		Name:       pb.GetName(),
-		Label:      pb.GetLabel(),
-		Popularity: pb.GetPopularity(),
-		Type:       pb.GetTypeStr(),
-	}
-
-	if len(pb.Gid) > 0 {
-		a.URI = "spotify:album:" + librespot.GidToBase62(pb.Gid)
-	}
-
-	if pb.Date != nil {
-		a.Year = int(pb.Date.GetYear())
-	}
-
-	for _, ar := range pb.Artist {
-		a.Artists = append(a.Artists, artistRefFromProto(ar))
-	}
-
-	for _, d := range pb.Disc {
-		a.TrackCount += len(d.GetTrack())
-	}
-
-	a.Covers = imagesFromProto(pb.Cover)
-	if len(a.Covers) == 0 && pb.CoverGroup != nil {
-		a.Covers = imagesFromProto(pb.CoverGroup.GetImage())
-	}
-}
-
-func (a *Artist) FromProto(pb *metadatapb.Artist) {
-	*a = Artist{
-		Name:       pb.GetName(),
-		Popularity: pb.GetPopularity(),
-	}
-
-	if len(pb.Gid) > 0 {
-		a.URI = "spotify:artist:" + librespot.GidToBase62(pb.Gid)
-	}
-
-	a.Portraits = imagesFromProto(pb.Portrait)
-	if len(a.Portraits) == 0 && pb.PortraitGroup != nil {
-		a.Portraits = imagesFromProto(pb.PortraitGroup.GetImage())
-	}
-}
-
 func (p *Playlist) FromProto(pb *playlist4pb.SelectedListContent) {
 	*p = Playlist{
 		Owner:      pb.GetOwnerUsername(),
 		TrackCount: int(pb.GetLength()),
 	}
-
 	if pb.Attributes != nil {
 		p.Name = pb.Attributes.GetName()
 		p.Description = pb.Attributes.GetDescription()
 	}
-
 	if pb.CreatedAt != nil {
 		p.CreatedAt = time.Unix(*pb.CreatedAt, 0)
 	}
-}
-
-func artistRefFromProto(pb *metadatapb.Artist) ArtistRef {
-	ref := ArtistRef{Name: pb.GetName()}
-
-	if len(pb.Gid) > 0 {
-		ref.URI = "spotify:artist:" + librespot.GidToBase62(pb.Gid)
-	}
-
-	return ref
-}
-
-func imagesFromProto(pbs []*metadatapb.Image) []Image {
-	if len(pbs) == 0 {
-		return nil
-	}
-
-	imgs := make([]Image, 0, len(pbs))
-	for _, img := range pbs {
-		imgs = append(imgs, Image{
-			URL:    "https://i.scdn.co/image/" + hex.EncodeToString(img.GetFileId()),
-			Width:  img.GetWidth(),
-			Height: img.GetHeight(),
-		})
-	}
-
-	return imgs
-}
-
-type EnrichedTrack struct {
-	*Track
-	FullAlbum   *Album
-	FullArtists []*Artist
 }

@@ -45,20 +45,25 @@ func openWithBrowser(url string) error {
 	}
 }
 
-func (v *Auth) spawnEventReader(ech <-chan types.AuthEvent) {
+func (v *Auth) spawnEventReader(ctx context.Context, ech <-chan types.AuthEvent) {
+	lg := log.Ctx(ctx)
 	go func() {
 		for e := range ech {
-			log.Logger().Trace().Any("e", e).Msg("got event")
+			lg.Trace().Any("event", e).Msg("received")
 			switch typedE := e.(type) {
 			case types.SessionAuthorizedEvent:
+				lg.Trace().Msg("session authorized")
 				v.Session = typedE.Session
 				v.State.Set(ASReady)
 			case types.LinkEvent:
+				lg.Trace().Str("link", typedE.Link).Msg("login link")
 				v.State.Set(ASNeedsLogin)
 				openWithBrowser(typedE.Link)
 			case types.CodeReceivedEvent:
+				lg.Trace().Msg("code received")
 				v.State.Set(ASAuthorizing)
 			case types.FailedEvent:
+				lg.Warn().Err(typedE.Error).Msg("failed")
 				v.Error.Set(typedE.Error)
 				v.State.Set(ASAuthError)
 			}
@@ -66,7 +71,9 @@ func (v *Auth) spawnEventReader(ech <-chan types.AuthEvent) {
 	}()
 }
 
-func newAuthVM(auth types.Authenticator) *Auth {
+func newAuthVM(ctx context.Context, auth types.Authenticator) *Auth {
+	ctx = log.Span(ctx, "auth")
+
 	v := &Auth{
 		State: reactive.NewProp(ASChecking),
 		Error: reactive.NewProp[error](nil),
@@ -74,7 +81,7 @@ func newAuthVM(auth types.Authenticator) *Auth {
 	}
 
 	v.LoginCmd = reactive.NewCtxCommand(
-		func(ctx context.Context) { v.spawnEventReader(v.auth(ctx)) },
+		func(cmdCtx context.Context) { v.spawnEventReader(ctx, v.auth(cmdCtx)) },
 		func(context.Context) bool { return !v.eventReaderRunning.Load() },
 	)
 

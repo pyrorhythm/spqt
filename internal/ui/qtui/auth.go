@@ -11,35 +11,34 @@ import (
 )
 
 func authPage(ctx context.Context, avm *vm.Auth) *qt.QWidget {
-	page := qtw.Widget().Build()
 
-	status := qtw.EmptyLabel().Align(qt.AlignCenter).Font(font).Build()
-	retryBtn := qtw.Button("Retry").Visible(false).
-		OnClick(func() { avm.LoginCmd.Execute(ctx) }).
-		Build()
-
-	page.SetLayout(qtw.VBox().Items(status, retryBtn))
+	status := qtw.
+		EmptyLabel().Align(qt.AlignCenter).
+		Fontb(qtw.Font("IBM Plex Sans")).Q()
+	retryBtn := qtw.
+		Button("Retry").Visible(false).
+		OnClick(func() { avm.LoginCmd.Execute(ctx) }).Q()
 
 	avm.State.OnChange(func(s vm.AuthState) {
 		log.Logger().Trace().Any("s", s).Msg("got state change")
 		switch s {
 		case vm.ASChecking:
 			status.SetText("Connecting...")
-			retryBtn.QWidget.SetVisible(false)
+			retryBtn.SetVisible(false)
 		case vm.ASNeedsLogin:
 			status.SetText("Please, auth in opened window")
-			retryBtn.QWidget.SetVisible(false)
+			retryBtn.SetVisible(false)
 		case vm.ASAuthorizing:
 			status.SetText("Authorizing...")
-			retryBtn.QWidget.SetVisible(false)
+			retryBtn.SetVisible(false)
 		case vm.ASAuthError:
 			status.SetText("Error: " + avm.Error.Get().Error())
-			retryBtn.QWidget.SetVisible(true)
+			retryBtn.SetVisible(true)
 		case vm.ASReady:
 			status.SetText("Good to go!")
-			retryBtn.QWidget.SetVisible(false)
+			retryBtn.SetVisible(false)
 		}
 	})
 
-	return page
+	return qtw.Widget().Layout(qtw.VBox().Items(status, retryBtn)).Q()
 }

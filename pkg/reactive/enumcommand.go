@@ -1,6 +1,9 @@
 package reactive
 
+import "sync"
+
 type ECommand[T comparable] struct {
+	mu         sync.RWMutex
 	executables map[T]*Command
 }
 
@@ -9,18 +12,24 @@ func NewECommand[T comparable]() *ECommand[T] {
 }
 
 func (c *ECommand[T]) Register(on T, cmd *Command) {
+	c.mu.Lock()
 	c.executables[on] = cmd
+	c.mu.Unlock()
 }
 
 func (c *ECommand[T]) Execute(val T) {
-	if cmd, ok := c.executables[val]; ok {
+	c.mu.RLock()
+	cmd, ok := c.executables[val]
+	c.mu.RUnlock()
+	if ok {
 		cmd.Execute()
 	}
 }
 
 func (c *ECommand[T]) On(val T) *Command {
-	cmd, _ := c.executables[val]
-	return cmd
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.executables[val]
 }
 
 //

@@ -7,35 +7,63 @@ import (
 
 	"github.com/pyrorhythm/spqt/internal/ui/qtui/components/mpstates"
 	"github.com/pyrorhythm/spqt/internal/vm"
+	"github.com/pyrorhythm/spqt/pkg/log"
 	"github.com/pyrorhythm/spqt/pkg/qtw"
 )
 
-func BuildMainPage(ctx context.Context, shell *vm.Shell) *qt.QWidget {
-	pages := qtw.NewPages()
+type mainPage struct {
+	container *qt.QBoxLayout
+	current   qtw.Disposable
+	cancelCtx context.CancelFunc
+	baseCtx   context.Context
+	builders  map[vm.NavState]func(context.Context) qtw.Disposable
+}
 
-	builders := map[vm.SidebarState]func() *qt.QWidget{
-		vm.SbHome:        mpstates.BuildHome,
-		vm.SbSearch:      mpstates.BuildSearch,
-		vm.SbLikedTracks: mpstates.BuildLikedTracks(ctx, shell),
+func BuildMainPage(ctx context.Context, app *vm.App) *qt.QWidget {
+	ctx = log.Span(ctx, "nav")
+
+	mp := &mainPage{
+		container: qtw.VBox().NoMargins().Box(),
+		baseCtx:   ctx,
+		builders: map[vm.NavState]func(context.Context) qtw.Disposable{
+			vm.NavLikedTracks: mpstates.BuildLikedTracks(app),
+			vm.NavSearch:      mpstates.BuildSearch(app),
+		},
 	}
 
-	built := map[vm.SidebarState]bool{}
+	qtw.Bind(app.Nav, func(state vm.NavState) {
+		log.Trace(ctx).Str("page", state.String()).Msg("navigating")
+		mp.showPage(state)
+	})
 
-	show := func(state vm.SidebarState) {
-		name := state.String()
-		if !built[state] {
-			if builder, ok := builders[state]; ok {
-				pages.Page(name, builder())
-				built[state] = true
-			}
+	return qtw.Widget().Layout(mp.container.QLayout).Q()
+}
+
+func (mp *mainPage) showPage(state vm.NavState) {
+	if mp.current != nil {
+		if mp.cancelCtx != nil {
+			mp.cancelCtx()
 		}
-		pages.Show(name)
+		mp.current.Dispose()
+		mp.current = nil
 	}
 
-	// Build the initial page
-	show(shell.CurCtx.Get())
+	for mp.container.Count() > 0 {
+		mp.container.TakeAt(0)
+	}
 
-	shell.CurCtx.OnChange(show)
+	builder, ok := mp.builders[state]
+	if !ok {
+		lbl := qtw.Label(state.String()).Q()
+		mp.container.AddWidget(lbl.QWidget)
+		return
+	}
 
-	return pages.Widget()
+	pageCtx, cancel := context.WithCancel(mp.baseCtx)
+	mp.cancelCtx = cancel
+	mp.current = builder(pageCtx)
+
+	if w, ok := mp.current.(qtw.Widgeter); ok {
+		mp.container.AddWidget(w.Widget())
+	}
 }

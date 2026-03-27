@@ -12,11 +12,17 @@ type Widgeter interface {
 	Widget() *qt.QWidget
 }
 
+// Disposable is implemented by components that need cleanup.
+type Disposable interface {
+	Dispose()
+}
+
 // Component is a base struct that concrete UI components embed.
 // It provides a root widget, child tracking, and reactive Watch support.
 type Component struct {
 	root     *qt.QWidget
 	children []Widgeter
+	unsubs   []func()
 }
 
 // Root sets the component's root widget.
@@ -37,10 +43,35 @@ func (c *Component) Child(child Widgeter) Widgeter {
 	return child
 }
 
+// WatchUnsub registers an unsubscribe function for cleanup on Dispose.
+func (c *Component) WatchUnsub(unsub func()) {
+	c.unsubs = append(c.unsubs, unsub)
+}
+
+// Dispose unsubscribes all listeners, disposes children, then destroys the root widget.
+func (c *Component) Dispose() {
+	for _, fn := range c.unsubs {
+		fn()
+	}
+	c.unsubs = nil
+	for _, child := range c.children {
+		if d, ok := child.(Disposable); ok {
+			d.Dispose()
+		}
+	}
+	if c.root != nil {
+		c.root.SetParent(nil)
+		c.root.Delete()
+		c.root = nil
+	}
+}
+
 // Watch subscribes to an Observable, calling fn immediately with the current
-// value and on every subsequent change. Free function because Go disallows
-// generic methods on non-generic types.
-func Watch[T any](obs reactive.Observable[T], fn func(T)) {
+// value and on every subsequent change.
+// Returns an unsubscribe function.
+func Watch[T any](obs reactive.Observable[T], fn func(T)) func() {
 	fn(obs.Get())
-	obs.OnChange(fn)
+	return obs.OnChange(func(v T) {
+		fn(v)
+	})
 }

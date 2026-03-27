@@ -1,16 +1,23 @@
 package reactive
 
+import (
+	"sync"
+)
+
 type Command struct {
-	execute    func()
-	canExec    func() bool
-	listeners  []func(bool)
+	mu          sync.RWMutex
+	execute     func()
+	canExec     func() bool
+	nextID      uint64
+	listeners   map[uint64]func(bool)
 	lastCanExec bool
 }
 
 func NewCommand(execute func(), canExecute func() bool) *Command {
 	c := &Command{
-		execute: execute,
-		canExec: canExecute,
+		execute:   execute,
+		canExec:   canExecute,
+		listeners: make(map[uint64]func(bool)),
 	}
 	if canExecute != nil {
 		c.lastCanExec = canExecute()
@@ -21,13 +28,20 @@ func NewCommand(execute func(), canExecute func() bool) *Command {
 }
 
 func (c *Command) Execute() {
-	if !c.CanExecute() {
+	c.mu.RLock()
+	exec := c.execute
+	canExec := c.canExec
+	c.mu.RUnlock()
+
+	if canExec != nil && !canExec() {
 		return
 	}
-	c.execute()
+	exec()
 }
 
 func (c *Command) CanExecute() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.canExec == nil {
 		return true
 	}
@@ -35,18 +49,32 @@ func (c *Command) CanExecute() bool {
 }
 
 // Refresh re-evaluates CanExecute and notifies listeners if it changed.
-// Call this after mutating state that affects the condition.
 func (c *Command) Refresh() {
+	c.mu.Lock()
 	cur := c.CanExecute()
 	if cur == c.lastCanExec {
+		c.mu.Unlock()
 		return
 	}
 	c.lastCanExec = cur
+	fns := make([]func(bool), 0, len(c.listeners))
 	for _, fn := range c.listeners {
+		fns = append(fns, fn)
+	}
+	c.mu.Unlock()
+	for _, fn := range fns {
 		fn(cur)
 	}
 }
 
-func (c *Command) OnCanExecuteChanged(fn func(canExec bool)) {
-	c.listeners = append(c.listeners, fn)
+func (c *Command) OnCanExecuteChanged(fn func(canExec bool)) func() {
+	id := nextIDUint64()
+	c.mu.Lock()
+	c.listeners[id] = fn
+	c.mu.Unlock()
+	return func() {
+		c.mu.Lock()
+		delete(c.listeners, id)
+		c.mu.Unlock()
+	}
 }

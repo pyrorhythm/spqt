@@ -38,7 +38,7 @@ func (b *MenuBuilder) Sub(sub *MenuBuilder) *MenuBuilder {
 	return b
 }
 
-func (b *MenuBuilder) Build() *qt.QMenu { return b.menu }
+func (b *MenuBuilder) Q() *qt.QMenu { return b.menu }
 
 // MenuBar creates a menu bar and adds the given menus.
 func MenuBar(menus ...*MenuBuilder) *qt.QMenuBar {

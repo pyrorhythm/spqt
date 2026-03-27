@@ -2,59 +2,56 @@ package mpstates
 
 import (
 	"context"
-	"strings"
 
-	qt "github.com/mappu/miqt/qt6"
+	metadatapb "github.com/devgianlu/go-librespot/proto/spotify/metadata"
 
-	"github.com/pyrorhythm/spqt/internal/types"
 	"github.com/pyrorhythm/spqt/internal/vm"
+	"github.com/pyrorhythm/spqt/pkg/log"
 	"github.com/pyrorhythm/spqt/pkg/qtw"
 )
 
-func artistsStr(ar []types.ArtistRef) string {
-	var ans = make([]string, len(ar))
-
-	for _, a := range ar {
-		ans = append(ans, a.Name)
-	}
-
-	return strings.Join(ans, ", ")
+type likedPage struct {
+	qtw.Component
+	vl *qtw.VirtualList[*metadatapb.Track]
 }
 
-func BuildLikedTracks(ctx context.Context, sh *vm.Shell) func() *qt.QWidget {
-	return func() *qt.QWidget {
-		cr, _ := sh.Client.LikedTracks(ctx)
-		ts, _ := sh.Client.EnrichPage(ctx, cr, 0)
+func (p *likedPage) Dispose() {
+	if p.vl != nil {
+		p.vl.Destroy()
+		p.vl = nil
+	}
+	p.Component.Dispose()
+}
 
-		tbl := qtw.
-			Table().Name("Liked tracks").
-			NoVertHeader().Cols("Title", "Artist", "Album", "Duration").
-			OnRowClick(func(row int) { sh.Player.Current.Set(ts[row]) }).
-			Build()
+func BuildLikedTracks(app *vm.App) func(context.Context) qtw.Disposable {
+	return func(ctx context.Context) qtw.Disposable {
+		ctx = log.Span(ctx, "liked")
+		log.Trace(ctx).Msg("building virtual track list")
 
-		qtw.FillTable(tbl, len(ts), func(row int) []string {
-			et := ts[row]
-
-			if et.Track == nil {
-				return nil
+		go func() {
+			err := app.Client.FetchLikesEnrich(ctx, qtw.Guard(app.LikedTracks.AddBatch))
+			if err != nil {
+				log.Error(ctx).Err(err).Msg("FetchLikesEnrich failed")
 			}
+		}()
 
-			return []string{
-				et.Track.Name,
-				artistsStr(et.Track.Artists),
-				et.Album.Name,
-				qtw.FormatDuration(et.DurationMs),
-			}
+		vl := qtw.NewVirtualList(qtw.VirtualListConfig[*metadatapb.Track]{
+			ItemHeight:  TrackRowHeight,
+			BufferCount: 10,
+			CreateItem:  CreateTrackRow,
+			BindItem:    BindTrackRow(app.Player, app.Images),
+			Placeholder: PlaceholderTrackRow,
+			Data:        app.LikedTracks,
 		})
 
-		return qtw.Widget().Layout(
-			qtw.VBox().Margins(24, 24, 24, 24).Spacing(16).Items(
-				qtw.Label("Liked Songs").
-					Property("heading", qt.NewQVariant14("true")).
-					Build(),
-				qtw.Stretch(),
-				tbl,
-			),
-		).Build()
+		c := &likedPage{vl: vl}
+
+		return c.Root(qtw.Widget().
+			Layout(
+				qtw.VBox().Margins(24, 24, 24, 24).Spacing(16).Items(
+					qtw.Label("Liked Songs").PropStr("heading", "true").Q(),
+					c.vl,
+				),
+			).Q())
 	}
 }

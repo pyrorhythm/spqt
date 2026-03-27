@@ -11,298 +11,218 @@ import (
 	extmetadatapb "github.com/devgianlu/go-librespot/proto/spotify/extendedmetadata"
 	metadatapb "github.com/devgianlu/go-librespot/proto/spotify/metadata"
 	"github.com/devgianlu/go-librespot/spclient"
+	"github.com/pkg/errors"
 
+	"github.com/pyrorhythm/fn"
 	"github.com/pyrorhythm/spqt/internal/types"
 	"github.com/pyrorhythm/spqt/pkg/log"
 )
 
+const enrichBatchSize = 50
+
+var _ types.Client = (*clientImpl)(nil)
+
 type clientImpl struct {
+	ctx  context.Context
 	sess types.Session
 	p    *player.Player
 }
 
-func (c *clientImpl) Player() *player.Player {
-	return c.p
-}
+func (c *clientImpl) Player() *player.Player { return c.p }
+func (c *clientImpl) Close()                 { c.sess.Close() }
 
-func (c *clientImpl) Close() {
-	c.sess.Close()
-}
-
-func NewClient(sess types.Session) types.Client {
+func NewClient(ctx context.Context, sess types.Session) types.Client {
+	ctx = log.Span(ctx, "respot")
+	log.Trace(ctx).Msg("creating client")
 	pl, err := newPlayer(sess)
-
 	if err != nil {
-		log.Logger().Error().Stack().Err(err).Msg("failed to create new player")
+		log.Error(ctx).Stack().Err(err).Msg("failed to create new player")
 	}
-
-	return &clientImpl{sess: sess, p: pl}
+	log.Trace(ctx).Msg("client ready")
+	return &clientImpl{ctx: ctx, sess: sess, p: pl}
 }
 
-func (c *clientImpl) resolve(ctx context.Context, sc *connectpb.Context) (*spclient.ContextResolver, error) {
-	return spclient.NewContextResolver(ctx, FromContext(ctx), c.sess.Spclient(), sc)
+func sanitize(str string) string {
+	return strings.Join(strings.Fields(str), "+")
 }
 
-// Request the context for an uri
-//
-// All [SpotifyId] uris are supported in addition to the following special uris:
-// - liked songs:
-//   - all: `spotify:user:<user_id>:collection`
-//   - of artist: `spotify:user:<user_id>:collection:artist:<artist_id>`
-// - search: `spotify:search:<search+query>` (whitespaces are replaced with `+`)
+func searchURI(str string) string {
+	return fmt.Sprintf("spotify:search:%s", sanitize(str))
+}
+
+func likedTracksURI(username string, artistID *string) string {
+	return fmt.Sprintf(
+		"spotify:user:%s:collection%s",
+		username, fn.If(artistID != nil, fmt.Sprintf(":artist:%s", *artistID), ""),
+	)
+}
+
+func firstOrNil[T any](els ...T) *T {
+	if len(els) > 0 {
+		return &els[0]
+	}
+	return nil
+}
+
+func w[T any](v T, e error) func(string) (T, error) {
+	return func(s string) (T, error) {
+		return v, errors.Wrap(e, s)
+	}
+}
 
 func (c *clientImpl) Search(ctx context.Context, query string) (*spclient.ContextResolver, error) {
-	encq := strings.Join(strings.Fields(query), "+")
-	sc, err := c.sess.Spclient().
-		ContextResolve(ctx, fmt.Sprintf("spotify:search:%s", encq))
-	if err != nil {
-		return nil, fmt.Errorf("failed to perform (%s) search: %w", query, err)
-	}
-
-	cr, err := c.resolve(ctx, sc)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve search context: %w", err)
-	}
-
-	return cr, nil
+	return w(c.ResolveContext(ctx, searchURI(query)))("search")
 }
 
-func (c *clientImpl) LikedTracks(ctx context.Context, artistId ...string) (*spclient.ContextResolver, error) {
-	uri := fmt.Sprintf("spotify:user:%s:%s", c.sess.Username(), "collection")
-	if len(artistId) > 0 {
-		uri += fmt.Sprintf(":artist:%s", artistId[0])
-	}
-
-	sc, err := c.sess.Spclient().
-		ContextResolve(ctx, uri)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get users' liked tracks: %w", err)
-	}
-
-	cr, err := c.resolve(ctx, sc)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve liked tracks context: %w", err)
-	}
-
-	return cr, nil
+func (c *clientImpl) LikedTracks(ctx context.Context, artistID ...string) (*spclient.ContextResolver, error) {
+	return w(c.ResolveContext(ctx, likedTracksURI(c.sess.Username(), firstOrNil(artistID...))))("liked tracks")
 }
 
 func (c *clientImpl) ResolveContext(ctx context.Context, uri string) (*spclient.ContextResolver, error) {
+	log.Ctx(c.ctx).Trace().Str("uri", uri).Msg("resolve context")
 	sc, err := c.sess.Spclient().ContextResolve(ctx, uri)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve context %s: %w", uri, err)
+		return nil, fmt.Errorf("resolve %s: %w", uri, err)
 	}
-
-	return c.resolve(ctx, sc)
+	return spclient.NewContextResolver(ctx, fromContext(ctx), c.sess.Spclient(), sc)
 }
 
-func (c *clientImpl) FetchTrackMetadata(ctx context.Context, uri string) (*types.Track, error) {
+func (c *clientImpl) FetchTrackMetadata(ctx context.Context, uri string) (*metadatapb.Track, error) {
+	log.Ctx(c.ctx).Trace().Str("uri", uri).Msg("fetch track metadata")
 	id, err := librespot.SpotifyIdFromUri(uri)
 	if err != nil {
 		return nil, fmt.Errorf("invalid track uri: %w", err)
 	}
-
 	var pb metadatapb.Track
-	if err := c.sess.Spclient().ExtendedMetadataSimple(
-		ctx, *id, extmetadatapb.ExtensionKind_TRACK_V4, &pb,
-	); err != nil {
-		return nil, fmt.Errorf("failed fetching track metadata for %s: %w", uri, err)
+	if err := c.sess.Spclient().ExtendedMetadataSimple(ctx, *id, extmetadatapb.ExtensionKind_TRACK_V4, &pb); err != nil {
+		return nil, fmt.Errorf("fetch track %s: %w", uri, err)
 	}
-
-	var t types.Track
-	t.FromProto(&pb)
-	return &t, nil
+	return &pb, nil
 }
 
-func (c *clientImpl) FetchAlbumMetadata(ctx context.Context, uri string) (*types.Album, error) {
+func (c *clientImpl) FetchAlbumMetadata(ctx context.Context, uri string) (*metadatapb.Album, error) {
+	log.Ctx(c.ctx).Trace().Str("uri", uri).Msg("fetch album metadata")
 	id, err := librespot.SpotifyIdFromUri(uri)
 	if err != nil {
 		return nil, fmt.Errorf("invalid album uri: %w", err)
 	}
-
 	var pb metadatapb.Album
-	if err := c.sess.Spclient().ExtendedMetadataSimple(
-		ctx, *id, extmetadatapb.ExtensionKind_ALBUM_V4, &pb,
-	); err != nil {
-		return nil, fmt.Errorf("failed fetching album metadata for %s: %w", uri, err)
+	if err := c.sess.Spclient().ExtendedMetadataSimple(ctx, *id, extmetadatapb.ExtensionKind_ALBUM_V4, &pb); err != nil {
+		return nil, fmt.Errorf("fetch album %s: %w", uri, err)
 	}
-
-	var a types.Album
-	a.FromProto(&pb)
-	return &a, nil
+	return &pb, nil
 }
 
-func (c *clientImpl) FetchArtistMetadata(ctx context.Context, uri string) (*types.Artist, error) {
+func (c *clientImpl) FetchArtistMetadata(ctx context.Context, uri string) (*metadatapb.Artist, error) {
+	log.Ctx(c.ctx).Trace().Str("uri", uri).Msg("fetch artist metadata")
 	id, err := librespot.SpotifyIdFromUri(uri)
 	if err != nil {
 		return nil, fmt.Errorf("invalid artist uri: %w", err)
 	}
-
 	var pb metadatapb.Artist
-	if err := c.sess.Spclient().ExtendedMetadataSimple(
-		ctx, *id, extmetadatapb.ExtensionKind_ARTIST_V4, &pb,
-	); err != nil {
-		return nil, fmt.Errorf("failed fetching artist metadata for %s: %w", uri, err)
+	if err := c.sess.Spclient().ExtendedMetadataSimple(ctx, *id, extmetadatapb.ExtensionKind_ARTIST_V4, &pb); err != nil {
+		return nil, fmt.Errorf("fetch artist %s: %w", uri, err)
 	}
-
-	var a types.Artist
-	a.FromProto(&pb)
-	return &a, nil
+	return &pb, nil
 }
 
-// EnrichPage fetches a page from the resolver, then issues batched metadata
-// requests.
-//
-//  - fetch all track metadata
-//  - extract album/artist URIs from the track protos and batch-fetch those
+// EnrichPage fetches a page of tracks (TRACK_V4 only) and streams results
+// in batches via onBatch. Album/artist enrichment is done lazily by callers.
 func (c *clientImpl) EnrichPage(
 	ctx context.Context,
 	cr *spclient.ContextResolver,
 	pageIdx int,
-) ([]types.EnrichedTrack, error) {
+	onBatch func([]*metadatapb.Track),
+) error {
+	log.Trace(ctx).Int("page", pageIdx).Msg("enrich page start")
 	ctxTracks, err := cr.Page(ctx, pageIdx)
 	if err != nil {
-		return nil, fmt.Errorf("failed fetching page %d: %w", pageIdx, err)
+		return fmt.Errorf("page %d: %w", pageIdx, err)
 	}
+	log.Trace(ctx).Int("tracks", len(ctxTracks)).Msg("page resolved")
 	if len(ctxTracks) == 0 {
-		return nil, nil
+		return nil
 	}
 
-	lg := log.Ctx(ctx)
-
-	// Convert to ProvidedTracks, collect track URIs.
 	pts := make([]*connectpb.ProvidedTrack, 0, len(ctxTracks))
 	for _, ct := range ctxTracks {
 		pts = append(pts, librespot.ContextTrackToProvidedTrack(cr.Type(), ct))
 	}
 
-	// --- Phase 1: batch-fetch all tracks ---
-	trackEntities := make([]*extmetadatapb.EntityRequest, 0, len(pts))
+	for start := 0; start < len(pts); start += enrichBatchSize {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		end := min(start+enrichBatchSize, len(pts))
+
+		log.Trace(ctx).Int("start", start).Int("end", end).Msg("fetching batch")
+		batch, err := c.fetchTrackBatch(ctx, pts[start:end])
+		if err != nil {
+			return fmt.Errorf("batch [%d:%d]: %w", start, end, err)
+		}
+		log.Trace(ctx).Int("count", len(batch)).Msg("batch ready, dispatching")
+		onBatch(batch)
+	}
+
+	return nil
+}
+
+// fetchTrackBatch issues a single batched TRACK_V4 request.
+func (c *clientImpl) fetchTrackBatch(
+	ctx context.Context,
+	pts []*connectpb.ProvidedTrack,
+) ([]*metadatapb.Track, error) {
+
+	entities := make([]*extmetadatapb.EntityRequest, 0, len(pts))
 	for _, pt := range pts {
-		trackEntities = append(trackEntities, &extmetadatapb.EntityRequest{
+		entities = append(entities, &extmetadatapb.EntityRequest{
 			EntityUri: pt.Uri,
 			Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_TRACK_V4}},
 		})
 	}
 
-	trackResp, err := c.sess.Spclient().ExtendedMetadata(ctx, &extmetadatapb.BatchedEntityRequest{
-		EntityRequest: trackEntities,
+	resp, err := c.sess.Spclient().ExtendedMetadata(ctx, &extmetadatapb.BatchedEntityRequest{
+		EntityRequest: entities,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("batch track metadata request failed: %w", err)
+		return nil, err
 	}
 
 	trackPBs := make(map[string]*metadatapb.Track, len(pts))
-	for _, arr := range trackResp.ExtendedMetadata {
+	for _, arr := range resp.ExtendedMetadata {
 		for _, ext := range arr.ExtensionData {
 			if ext.Header.StatusCode != 200 {
-				lg.Warn().Str("uri", ext.EntityUri).Int32("status", ext.Header.StatusCode).Msg("track metadata non-200")
+				log.Warn(ctx).Str("uri", ext.EntityUri).Int32("status", ext.Header.StatusCode).Msg("track non-200")
 				continue
 			}
 			var pb metadatapb.Track
 			if err := ext.ExtensionData.UnmarshalTo(&pb); err != nil {
-				lg.Warn().Err(err).Str("uri", ext.EntityUri).Msg("failed to unmarshal track")
+				log.Warn(ctx).Err(err).Str("uri", ext.EntityUri).Msg("unmarshal track")
 				continue
 			}
 			trackPBs[ext.EntityUri] = &pb
 		}
 	}
 
-	// --- Phase 2: collect album/artist URIs from track protos, batch-fetch ---
-	albumURISet := make(map[string]struct{})
-	artistURISet := make(map[string]struct{})
-
-	for _, pb := range trackPBs {
-		if pb.Album != nil && len(pb.Album.Gid) > 0 {
-			albumURISet["spotify:album:"+librespot.GidToBase62(pb.Album.Gid)] = struct{}{}
-		}
-		for _, a := range pb.Artist {
-			if len(a.Gid) > 0 {
-				artistURISet["spotify:artist:"+librespot.GidToBase62(a.Gid)] = struct{}{}
-			}
-		}
-	}
-
-	albums := make(map[string]*metadatapb.Album)
-	artists := make(map[string]*metadatapb.Artist)
-
-	if len(albumURISet)+len(artistURISet) > 0 {
-		var auxEntities []*extmetadatapb.EntityRequest
-		for uri := range albumURISet {
-			auxEntities = append(auxEntities, &extmetadatapb.EntityRequest{
-				EntityUri: uri,
-				Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_ALBUM_V4}},
-			})
-		}
-		for uri := range artistURISet {
-			auxEntities = append(auxEntities, &extmetadatapb.EntityRequest{
-				EntityUri: uri,
-				Query:     []*extmetadatapb.ExtensionQuery{{ExtensionKind: extmetadatapb.ExtensionKind_ARTIST_V4}},
-			})
-		}
-
-		auxResp, err := c.sess.Spclient().ExtendedMetadata(ctx, &extmetadatapb.BatchedEntityRequest{
-			EntityRequest: auxEntities,
-		})
-		if err != nil {
-			lg.Warn().Err(err).Msg("batch album/artist metadata request failed, continuing without enrichment")
-		} else {
-			for _, arr := range auxResp.ExtendedMetadata {
-				for _, ext := range arr.ExtensionData {
-					if ext.Header.StatusCode != 200 {
-						lg.Warn().Str("uri", ext.EntityUri).Int32("status",
-							ext.Header.StatusCode).Msg("aux metadata non-200")
-						continue
-					}
-					switch arr.ExtensionKind {
-					case extmetadatapb.ExtensionKind_ALBUM_V4:
-						var pb metadatapb.Album
-						if err := ext.ExtensionData.UnmarshalTo(&pb); err == nil {
-							albums[ext.EntityUri] = &pb
-						}
-					case extmetadatapb.ExtensionKind_ARTIST_V4:
-						var pb metadatapb.Artist
-						if err := ext.ExtensionData.UnmarshalTo(&pb); err == nil {
-							artists[ext.EntityUri] = &pb
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// --- Assemble enriched tracks ---
-	result := make([]types.EnrichedTrack, 0, len(pts))
-
+	result := make([]*metadatapb.Track, 0, len(pts))
 	for _, pt := range pts {
-		pbTrack, ok := trackPBs[pt.Uri]
-		if !ok {
-			lg.Warn().Str("uri", pt.Uri).Msg("track missing from batch response, skipping")
-			continue
+		if pb, ok := trackPBs[pt.Uri]; ok {
+			result = append(result, pb)
+		} else {
+			log.Warn(ctx).Str("uri", pt.Uri).Msg("track missing from batch")
 		}
+	}
+	return result, nil
+}
 
-		var t types.Track
-		t.FromProto(pbTrack)
-		et := types.EnrichedTrack{Track: &t}
-
-		// Album
-		if pbAlbum, ok := albums[t.Album.URI]; ok {
-			var a types.Album
-			a.FromProto(pbAlbum)
-			et.FullAlbum = &a
-		}
-
-		// Artists
-		for _, ar := range t.Artists {
-			if pbArt, ok := artists[ar.URI]; ok {
-				var a types.Artist
-				a.FromProto(pbArt)
-				et.FullArtists = append(et.FullArtists, &a)
-			}
-		}
-
-		result = append(result, et)
+func (c *clientImpl) FetchLikesEnrich(
+	ctx context.Context,
+	onBatch func([]*metadatapb.Track),
+) error {
+	cr, err := c.LikedTracks(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to fetch liked tracks")
 	}
 
-	return result, nil
+	return c.EnrichPage(ctx, cr, 0, onBatch)
 }

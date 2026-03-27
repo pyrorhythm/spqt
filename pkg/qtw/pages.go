@@ -1,6 +1,10 @@
 package qtw
 
-import qt "github.com/mappu/miqt/qt6"
+import (
+	"fmt"
+
+	qt "github.com/mappu/miqt/qt6"
+)
 
 // Pages is a named wrapper around QStackedWidget.
 type Pages struct {
@@ -27,6 +31,18 @@ func (p *Pages) Page(name string, widget *qt.QWidget) *Pages {
 func (p *Pages) Show(name string) {
 	if idx, ok := p.index[name]; ok {
 		p.stack.SetCurrentIndex(idx)
+	}
+}
+
+func (p *Pages) ShowStringer(name fmt.Stringer) {
+	if idx, ok := p.index[name.String()]; ok {
+		p.stack.SetCurrentIndex(idx)
+	}
+}
+
+func PageAdapter[T fmt.Stringer](p *Pages) func(T) {
+	return func(t T) {
+		p.ShowStringer(t)
 	}
 }
 

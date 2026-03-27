@@ -1,10 +1,47 @@
 package qtw
 
 import (
+	"sync"
+
 	qt "github.com/mappu/miqt/qt6"
+	"github.com/mappu/miqt/qt6/mainthread"
 
 	"github.com/pyrorhythm/spqt/pkg/reactive"
 )
+
+// userData is a thread-safe map for storing arbitrary data on widgets.
+// This avoids the need for global maps that grow indefinitely.
+var userDataMu sync.RWMutex
+var userData = map[*qt.QWidget]map[string]any{}
+
+// SetUserData stores arbitrary data on a widget, keyed by the widget pointer.
+func SetUserData(w *qt.QWidget, key string, val any) {
+	userDataMu.Lock()
+	defer userDataMu.Unlock()
+	if userData[w] == nil {
+		userData[w] = make(map[string]any)
+	}
+	userData[w][key] = val
+}
+
+// GetUserData retrieves previously stored data from a widget.
+func GetUserData(w *qt.QWidget, key string) (any, bool) {
+	userDataMu.RLock()
+	defer userDataMu.RUnlock()
+	if m, ok := userData[w]; ok {
+		if val, ok := m[key]; ok {
+			return val, true
+		}
+	}
+	return nil, false
+}
+
+// DeleteUserData removes all user data for a widget.
+func DeleteUserData(w *qt.QWidget) {
+	userDataMu.Lock()
+	defer userDataMu.Unlock()
+	delete(userData, w)
+}
 
 type LabelBuilder struct{ lbl *qt.QLabel }
 
@@ -31,6 +68,11 @@ func (b *LabelBuilder) Font(f *qt.QFont) *LabelBuilder {
 	return b
 }
 
+func (b *LabelBuilder) Fontb(f *FontBuilder) *LabelBuilder {
+	b.lbl.SetFont(f.Q())
+	return b
+}
+
 func (b *LabelBuilder) FixedSize(w, h int) *LabelBuilder {
 	b.lbl.SetFixedSize2(w, h)
 	return b
@@ -46,6 +88,11 @@ func (b *LabelBuilder) Pixmap(pm *qt.QPixmap) *LabelBuilder {
 	return b
 }
 
+func (b *LabelBuilder) Inspect(fn func(*qt.QLabel)) *LabelBuilder {
+	fn(b.lbl)
+	return b
+}
+
 func (b *LabelBuilder) WordWrap(on bool) *LabelBuilder {
 	b.lbl.SetWordWrap(on)
 	return b
@@ -56,12 +103,17 @@ func (b *LabelBuilder) Property(name string, vart *qt.QVariant) *LabelBuilder {
 	return b
 }
 
+func (b *LabelBuilder) PropStr(name string, s string) *LabelBuilder {
+	b.lbl.SetProperty(name, QVarStr(s))
+	return b
+}
+
 func (b *LabelBuilder) BindText(prop *reactive.Prop[string]) *LabelBuilder {
 	Bind(prop, b.lbl.SetText)
 	return b
 }
 
-func (b *LabelBuilder) Build() *qt.QLabel { return b.lbl }
+func (b *LabelBuilder) Q() *qt.QLabel { return b.lbl }
 
 type ButtonBuilder struct{ btn *qt.QPushButton }
 
@@ -122,7 +174,7 @@ func (b *ButtonBuilder) BindIcon(prop *reactive.Prop[bool], whenTrue, whenFalse 
 	return b
 }
 
-func (b *ButtonBuilder) Build() *qt.QPushButton { return b.btn }
+func (b *ButtonBuilder) Q() *qt.QPushButton { return b.btn }
 
 type SliderBuilder struct{ s *qt.QSlider }
 
@@ -148,15 +200,38 @@ func (b *SliderBuilder) Name(n string) *SliderBuilder {
 	return b
 }
 
-func (b *SliderBuilder) BindValue(prop *reactive.Prop[int32]) *SliderBuilder {
-	Bind(prop, func(v int32) { b.s.SetValue(int(v)) })
+func (b *SliderBuilder) BindValue(prop *reactive.Prop[int64]) *SliderBuilder {
+	Bind(prop, func(v int64) { b.s.SetValue(int(v)) })
 	return b
 }
 
-func (b *SliderBuilder) BindRange(min, max *reactive.Prop[int32]) *SliderBuilder {
-	Bind(min, func(v int32) { b.s.SetMinimum(int(v)) })
-	Bind(max, func(v int32) { b.s.SetMaximum(int(v)) })
+// BindSeekable binds a prop to the slider value but suppresses updates while
+// the user is dragging. On release, onSeek is called with the final position.
+func (b *SliderBuilder) BindSeekable(prop *reactive.Prop[int64], onSeek func(int64)) *SliderBuilder {
+	seeking := false
+	prop.OnChange(func(v int64) {
+		mainthread.Wait(func() {
+			if !seeking {
+				b.s.SetValue(int(v))
+			}
+		})
+	})
+	b.s.SetValue(int(prop.Get()))
+	b.s.OnSliderPressed(func() { seeking = true })
+	b.s.OnSliderReleased(func() {
+		seeking = false
+		onSeek(int64(b.s.Value()))
+	})
 	return b
 }
 
-func (b *SliderBuilder) Build() *qt.QSlider { return b.s }
+// BindRange binds min/max props to slider range. Returns unsubs for cleanup.
+func (b *SliderBuilder) BindRange(min, max *reactive.Prop[int64]) (unsubMin, unsubMax func()) {
+	unsubMin = min.OnChange(func(v int64) { b.s.SetMinimum(int(v)) })
+	unsubMax = max.OnChange(func(v int64) { b.s.SetMaximum(int(v)) })
+	b.s.SetMinimum(int(min.Get()))
+	b.s.SetMaximum(int(max.Get()))
+	return
+}
+
+func (b *SliderBuilder) Q() *qt.QSlider { return b.s }

@@ -54,6 +54,38 @@ func Ctx(ctx context.Context) *zerolog.Logger {
 	return l
 }
 
-func WithContext(ctx context.Context, l zerolog.Logger) context.Context {
+func Trace(ctx context.Context) *zerolog.Event {
+	return Ctx(ctx).Trace()
+}
+
+func Debug(ctx context.Context) *zerolog.Event {
+	return Ctx(ctx).Debug()
+}
+
+func Info(ctx context.Context) *zerolog.Event {
+	return Ctx(ctx).Info()
+}
+
+func Warn(ctx context.Context) *zerolog.Event {
+	return Ctx(ctx).Warn()
+}
+
+func Error(ctx context.Context) *zerolog.Event {
+	return Ctx(ctx).Error()
+}
+
+func Panic(ctx context.Context) *zerolog.Event {
+	return Ctx(ctx).Panic()
+}
+
+func Fatal(ctx context.Context) *zerolog.Event {
+	return Ctx(ctx).Fatal()
+}
+
+func WithCtx(ctx context.Context, l zerolog.Logger) context.Context {
 	return l.WithContext(ctx)
+}
+
+func Span(ctx context.Context, span string) context.Context {
+	return Ctx(ctx).With().Str("span", span).Logger().WithContext(ctx)
 }

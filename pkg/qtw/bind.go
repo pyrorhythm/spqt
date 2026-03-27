@@ -8,24 +8,27 @@ import (
 
 // Bind subscribes to a Prop and calls setter whenever it changes.
 // Also calls setter immediately with the current value.
-func Bind[T comparable](prop *reactive.Prop[T], setter func(T)) {
+// Returns an unsubscriber function.
+func Bind[T comparable](prop *reactive.Prop[T], setter func(T)) func() {
 	setter(prop.Get())
-	prop.OnChange(setter)
+	return prop.OnChange(func(v T) {
+		setter(v)
+	})
 }
 
 // BindText binds a Prop[string] to a QLabel's text.
-func BindText(prop *reactive.Prop[string], label *qt.QLabel) {
-	Bind(prop, label.SetText)
+func BindText(prop *reactive.Prop[string], label *qt.QLabel) func() {
+	return Bind(prop, label.SetText)
 }
 
 // BindEnabled binds a Prop[bool] to a QWidget's enabled state.
-func BindEnabled(prop *reactive.Prop[bool], widget *qt.QWidget) {
-	Bind(prop, widget.SetEnabled)
+func BindEnabled(prop *reactive.Prop[bool], widget *qt.QWidget) func() {
+	return Bind(prop, widget.SetEnabled)
 }
 
 // BindVisible binds a Prop[bool] to a QWidget's visibility.
-func BindVisible(prop *reactive.Prop[bool], widget *qt.QWidget) {
-	Bind(prop, widget.SetVisible)
+func BindVisible(prop *reactive.Prop[bool], widget *qt.QWidget) func() {
+	return Bind(prop, widget.SetVisible)
 }
 
 // BindCommand connects a Command to a QPushButton: click→Execute, CanExecute→SetEnabled.
