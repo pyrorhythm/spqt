@@ -19,6 +19,10 @@ type mainPage struct {
 	builders  map[vm.NavState]func(context.Context) qtw.Disposable
 }
 
+func (mp *mainPage) widget() *qt.QWidget {
+	return qtw.Widget().Layout(mp.container.QLayout).Q()
+}
+
 func BuildMainPage(ctx context.Context, app *vm.App) *qt.QWidget {
 	ctx = log.Span(ctx, "nav")
 
@@ -36,7 +40,7 @@ func BuildMainPage(ctx context.Context, app *vm.App) *qt.QWidget {
 		mp.showPage(state)
 	})
 
-	return qtw.Widget().Layout(mp.container.QLayout).Q()
+	return mp.widget()
 }
 
 func (mp *mainPage) showPage(state vm.NavState) {
